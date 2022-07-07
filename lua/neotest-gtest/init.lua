@@ -106,17 +106,15 @@ function GTestNeotestAdapater.build_spec(args)
         -- but neotest keeps the colors nice and shiny. Thanks, neotest!
         "--gtest_color=yes"
     })
-    return {
-        command = command,
-        context = {results_path = results_path, tree = args.tree}
-    }
+    return {command = command, context = {results_path = results_path}}
 end
 
 ---@async
 ---@param spec neotest.RunSpec
 ---@param result neotest.StrategyResult
+---@param tree neotest.Tree
 ---@return neotest.Result[]
-function GTestNeotestAdapater.results(spec, result)
+function GTestNeotestAdapater.results(spec, result, tree)
     local success, data = pcall(lib.files.read, spec.context.results_path)
     if not success then
         vim.notify(string.format(
@@ -129,7 +127,7 @@ function GTestNeotestAdapater.results(spec, result)
     local reports = {}
     for _, testsuite in ipairs(gtest_output.testsuites) do
         for _, test in ipairs(testsuite.testsuite) do
-            local report = Report:new(test, spec.context.tree)
+            local report = Report:new(test, tree)
             reports[report:position_id()] =
                 report:to_neotest_report(result.output)
         end

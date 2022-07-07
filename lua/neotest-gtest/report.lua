@@ -71,11 +71,9 @@ function Report:_error_info(error)
     -- First line is "unknown file": exception thrown somewhere
     -- First line is "/path/to/file:linenum", the failure is insde the test
     -- First line is "/path/to/file:linenum", the failure is outside the test
-    print("filename, linenum, location:", filename, linenum, location)
     local header
     if linenum ~= nil then
-        -- gogle test ines are 1-indexed, neovim expects 0-indexed
-        linenum = tonumber(linenum) - 1
+        linenum = tonumber(linenum)
         assert(filename ~= nil, "error format not understood")
         if filename == test_data.path then
             header = string.format("Assertion failure at line %d:", linenum)
@@ -83,8 +81,6 @@ function Report:_error_info(error)
             -- the same line, which will likely lead to confusion
             -- TODO: Investigate alternatives, such as showing all errors with
             -- test names
-            print("test_data.range:", vim.inspect(test_data.range))
-            print("linenum", vim.inspect(linenum))
             if not range_contains(test_data.range, linenum) then
                 linenum = nil
             end
@@ -98,8 +94,6 @@ function Report:_error_info(error)
         -- file is unknown: do not repeat ourselves. GTest will say everything
         header = ""
     end
-    print("message:", vim.inspect(message))
-    print("linenum:", vim.inspect(linenum))
     return {
         message = header and (header .. "\n" .. message) or message,
         pretty_message = table.concat({
@@ -107,7 +101,8 @@ function Report:_error_info(error)
             header and COLOR_STOP or "", "\n", message, header or ""
         }),
         palette[error],
-        line = linenum
+        -- gogle test ines are 1-indexed, neovim expects 0-indexed
+        line = linenum and linenum - 1
     }
 end
 
@@ -122,7 +117,6 @@ end
 ---@param full_output string Path to a text file with full test output
 ---@return neotest.Result
 function Report:to_neotest_report(full_output)
-    print(full_output)
     return {
         status = self:status(),
         output = full_output,
