@@ -2,8 +2,12 @@ local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local parse = require("neotest-gtest.parse")
 local Report = require("neotest-gtest.report")
+local Cache = require("neotest-gtest.cache")
+local runners = require("neotest-gtest.runner")
 
 -- treesitter matches TEST macros as function definitions
+-- treesitter cannot possible know about macros defined in other files, so this
+-- is the best we can do. It works pretty well though.
 -- under C standard, they are valid definitions with implicit int return type
 -- (and with proper compiler flags the CPP code should also compile which should
 --  mean that treesitter should continue to parse these as function definitions)
@@ -17,9 +21,9 @@ local Report = require("neotest-gtest.report")
 -- The first parameter is the test suite, the second one is the test case
 -- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
 local query = [[
-((function_definition 
+((function_definition
 	declarator: (
-      function_declarator 
+      function_declarator
         declarator: (identifier) @test.kind
       parameters: (
         parameter_list
@@ -49,7 +53,7 @@ function GTestNeotestAdapater.discover_positions(path)
 end
 
 -- @param position neotest.Tree position to create a filter to
--- @returns string that
+-- @returns string
 local function position2filter(position)
     local data = position:data()
     local type = data.type
@@ -83,24 +87,34 @@ local function position2filter(position)
             end
         end
         return table.concat(filters, ":")
+    elseif type == "dir" then
+        -- TODO figure this out. If all tests are under one runner, no issues
+        -- running this. If under multiple, either need to run multiple commands
+        -- or write a wrapper script (in python, probably).
+        -- If runners for some of them are not known, unclear what to do. Asking
+        -- for every file is probably not a great idea
+        return nil
     else
         error("unknown position type " .. type)
     end
 end
 
 function GTestNeotestAdapater.build_spec(args)
-    local logdir = utils.test_results_dir()
-    local results_path = logdir .. "/test_result.json"
     local position = args.tree
+    local root = GTestNeotestAdapater.root(position:data().path)
+    local cache = Cache:cache_for(root)
+    local logdir = cache:new_results_dir()
+    local results_path = logdir .. "/test_result.json"
     local filter = position2filter(position)
-    -- completion will be relative to cwd() anyway
-    local executable = utils.get_gtest_executable(vim.fn.getcwd())
-    if executable == nil then
-        -- error already reported
-        return nil
+    if filter == nil then return nil end
+    local runner =
+        runners.runner_for(position:data().path, {interactive = true})
+    if runner == nil then
+        -- error (if any) already reported, just don't run anytihng
+        return {}
     end
     local command = vim.tbl_flatten({
-        executable, "--gtest_output=json:" .. results_path,
+        runner:executable(), "--gtest_output=json:" .. results_path,
         "--gtest_filter=" .. filter, args.extra_args,
         -- gtest doesn't print colors when begin redirected
         -- but neotest keeps the colors nice and shiny. Thanks, neotest!
@@ -115,6 +129,8 @@ end
 ---@param tree neotest.Tree
 ---@return neotest.Result[]
 function GTestNeotestAdapater.results(spec, result, tree)
+    -- nothing ran
+    if spec.context == nil then return {} end
     local success, data = pcall(lib.files.read, spec.context.results_path)
     if not success then
         vim.notify(string.format(

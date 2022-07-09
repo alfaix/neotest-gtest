@@ -98,7 +98,7 @@ function Report:_error_info(error)
         message = header and (header .. "\n" .. message) or message,
         pretty_message = table.concat({
             palette.failed, palette.bold_header and COLOR_BOLD or "", header,
-            header and COLOR_STOP or "", "\n", message, header or ""
+            header and COLOR_STOP or "", "\n", message
         }),
         palette[error],
         -- gogle test ines are 1-indexed, neovim expects 0-indexed
@@ -148,16 +148,15 @@ function Report:make_summary()
             end
         end
 
-        if status ~= "skipped" then
-            local error_string
-            if #errors ~= 0 then
-                error_string = string.format("Errors: %d", #errors)
-            else
-                error_string = "Passed"
-            end
-            lines[#lines + 1] = string.format("%s, Time: %s, Timestamp: %s",
-                                              error_string, test.time,
-                                              test.timestamp)
+        if status == "skipped" then
+            lines[#lines + 1] = "Test skipped."
+        elseif status == "passed" then
+            lines[#lines + 1] = string.format("Passed, Time: %s, Timestamp: %s",
+                                              test.time, test.timestamp)
+        else
+            lines[#lines + 1] = string.format(
+                "Errors: %d, Time: %s, Timestamp: %s", #errors, test.time,
+                test.timestamp)
         end
 
         for _, err in ipairs(errors) do

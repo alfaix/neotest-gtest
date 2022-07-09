@@ -41,6 +41,12 @@ TEST(TestOne, TestExceptionFailure) {
   throw std::runtime_error("oh no!");
 }
 
+TEST(TestOne, TestMultipleFailures) {
+  EXPECT_TRUE(false);
+  EXPECT_FALSE(true);
+  EXPECT_EQ(1, 2);
+}
+
 TEST(TestOne, TestSkipMe) {
   fillthisline();
   GTEST_SKIP() << "Skipped because why not";
