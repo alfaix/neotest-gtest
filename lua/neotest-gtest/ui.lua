@@ -1,12 +1,6 @@
 local async = require("plenary.async")
 local M = {}
 
----@class Field
----@field name string
----@field prompt string
----@field required boolean
----@field completion string
-
 local input = async.wrap(vim.ui.input, 2)
 
 ---Prompts the user to select one of `options` or (optionally) enter a new value
@@ -44,16 +38,15 @@ local function select_with_prompt(options, format, default, prompt,
     end
 
     local int = tonumber(result)
-    if int and int ~= math.floor(int) then int = nil end
-    if int == nil and not allow_string then
+    if int == nil or int ~= math.floor(int) then
+        if allow_string then return nil, result, nil end
         return nil, nil, "string entered when number was required"
     end
-    if int ~= nil then
-        if int < 1 or int > #options then
-            return nil, nil, "index out of range"
-        else
-            return int, options[int], nil
-        end
+
+    if int < 1 or int > #options then
+        return nil, nil, "index out of range"
+    else
+        return int, options[int], nil
     end
 end
 
@@ -92,6 +85,41 @@ function M.input(opts)
     return inpt, nil
 end
 
-function M.configure(fields, opts) end
+---@class Field
+---@field name string
+---@field human_name? string
+---@field default? string
+---@field required boolean
+---@field completion? string
+
+---Requests user input for `fields`, one input at a time.
+---@param fields Field[] fields to request from the user
+---@param _ table Options, currently unused
+---@return table|nil Table field.name -> user input
+---@return string|nil Error if any
+function M.configure(fields, _)
+    local values = {}
+    for _, field in ipairs(fields) do
+        local name = field.human_name or field.name
+        local prompt
+        if field.required then
+            prompt = string.format("Enter %s (required): ", name)
+        else
+            prompt = string.format("Enter %s (empty to leave unfilled): ", name)
+        end
+        local inpt, err = M.input({
+            prompt = prompt,
+            default = field.default or "",
+            completion = field.completion
+        })
+        if err then return nil, err end
+        if inpt == "" then inpt = nil end
+        if field.required and not inpt then
+            return nil, string.format("required filled %s left empty", name)
+        end
+        values[field.name] = inpt
+    end
+    return values, nil
+end
 
 return M

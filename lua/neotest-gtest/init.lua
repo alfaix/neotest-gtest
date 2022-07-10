@@ -107,11 +107,13 @@ function GTestNeotestAdapater.build_spec(args)
     local results_path = logdir .. "/test_result.json"
     local filter = position2filter(position)
     if filter == nil then return nil end
-    local runner =
-        runners.runner_for(position:data().path, {interactive = true})
+    local runner, err = runners.runner_for(position:data().path,
+                                           {interactive = true})
     if runner == nil then
-        -- error (if any) already reported, just don't run anytihng
-        return {}
+        vim.notify(err, 3, {})
+        -- currently no way to cancel, have to show the error twice, and in
+        -- an ugly way at that
+        error("Failed to run tests: see previous notification")
     end
     local command = vim.tbl_flatten({
         runner:executable(), "--gtest_output=json:" .. results_path,
@@ -130,7 +132,6 @@ end
 ---@return neotest.Result[]
 function GTestNeotestAdapater.results(spec, result, tree)
     -- nothing ran
-    if spec.context == nil then return {} end
     local success, data = pcall(lib.files.read, spec.context.results_path)
     if not success then
         vim.notify(string.format(
