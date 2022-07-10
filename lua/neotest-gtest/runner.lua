@@ -1,7 +1,7 @@
-local async = require("plenary.async")
 local utils = require("neotest-gtest.utils")
 local Path = require("plenary.path")
 local scandir = require("plenary.scandir")
+local ui = require("neotest-gtest.ui")
 
 local M = {}
 
@@ -19,40 +19,6 @@ local Runner = {}
 M._runners = {}
 M._last_chosen = nil
 
-local input = async.wrap(vim.ui.input, 2)
-
-local function choose_runner(path)
-    local options = {}
-    options[1] = string.format(
-        "Choose the executable for %s (or enter a new path)\n", path)
-    for i, runner in ipairs(M._runners) do
-        options[#options + 1] =
-            string.format("%d. %s\n", i, runner:executable())
-    end
-    options[#options + 1] =
-        "Enter the number of the executable (q or empty cancels): "
-    local prompt = table.concat(options, "")
-    local inpt = input({
-        prompt = prompt,
-        default = M.last_chosen and tostring(M.last_chosen),
-        completion = "file",
-        cancelreturn = ""
-    })
-
-    if inpt == "q" or inpt == "" then return nil end
-    local chosen = tonumber(inpt)
-    if chosen == nil then
-        return M.register_runner(inpt, nil, {path})
-    elseif chosen > #M._runners or chosen < 1 then
-        error(inpt .. " is out of range")
-    else
-        local runner = M._runners[chosen]
-        runner:add_path(path)
-        return chosen, runner
-    end
-
-end
-
 ---Returns the runner for path `path`. If interactive is true and no runner is
 ---registered for the path, will prompt the user to select one.
 ---@param path string Test file path to return the runner for
@@ -66,19 +32,34 @@ function M.runner_for(path, opts)
 
     if not opts.interactive then return nil end
 
-    local choice_idx, runner
+    local choice_idx, runner, error
     if #M._runners ~= 0 then
-        choice_idx, runner = choose_runner(path)
-    else
-        local prompt = string.format(
-            "Enter the executable path for %s (q or empty cancels): ", path)
-        local inpt = input({
-            prompt = prompt,
-            default = "",
-            completion = "file",
-            cancelreturn = ""
+        local selected
+        choice_idx, selected, error = ui.select(M._runners, {
+            format = function(option) return option:executable() end,
+            default = M._last_chosen,
+            prompt = string.format(
+                "Choose the executable for %s (or enter a new path)", path),
+            completion = "file"
         })
-        if inpt ~= nil and inpt ~= "q" and inpt ~= "" then
+        if error ~= nil then
+            vim.notify(error, 3, {})
+        elseif choice_idx == nil then
+            -- selected is the path to the test executable entered by the user
+            choice_idx, runner = M.register_runner(selected, nil, {path})
+        else
+            runner = selected
+        end
+    else
+        local inpt
+        inpt, error = ui.input({
+            prompt = string.format(
+                "Enter the executable path for %s (q or empty cancels): ", path),
+            completion = "file"
+        })
+        if error ~= nil then
+            vim.notify(error, 3, {})
+        elseif inpt then
             choice_idx, runner = M.register_runner(inpt, nil, {path})
         end
     end
