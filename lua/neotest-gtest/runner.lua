@@ -194,21 +194,25 @@ function Runner:owns(path)
     return false
 end
 
-function Runner:configure()
-    local fields = {
-        {
+function Runner:configure(opts)
+    opts = vim.tbl_extend(opts or {},
+                          {fields = {"executable", "compile_command", "paths"}})
+    local all_fields = {
+        executable = {
             name = "executable",
             human_name = "the path to the test executable",
             default = self._executable_path,
             required = true,
             completion = "file"
-        }, {
+        },
+        compile_command = {
             name = "compile_command",
             human_name = "the compilation command",
             default = self._compile_command,
             required = false,
             completion = "file"
-        }, {
+        },
+        paths = {
             name = "paths",
             human_name = "test paths (files/directories)",
             default = table.concat(vim.tbl_map(function(path)
@@ -218,11 +222,25 @@ function Runner:configure()
             completion = "file"
         }
     }
-    local user_input = ui.configure(fields)
-    self:set_executable(user_input.executable)
-    local paths = utils.parse_words(user_input.paths)
-    for _, path in ipairs(paths) do self:add_path(path) end
-    self:set_compile_command(user_input.compile_command)
+    local selected_fields = vim.tbl_map(function(field)
+        return all_fields[field]
+    end, opts.fields)
+    local user_input = ui.configure(selected_fields)
+
+    if vim.tbl_contains(opts.fields, "executable") then
+        self:set_executable(user_input.executable)
+    end
+
+    if vim.tbl_contains(opts.fields, "paths") then
+        local paths = utils.parse_words(user_input.paths)
+        self._paths = {}
+        for _, path in ipairs(paths) do self:add_path(path) end
+    end
+
+    if vim.tbl_contains(opts.fields, "compile_command") then
+        self:set_compile_command(user_input.compile_command)
+    end
+
     return true, nil
 end
 
@@ -254,8 +272,25 @@ function Runner:add_path(path)
     end
 end
 
--- TODO
-function Runner:recompile(opts) end
+function Runner:root()
+    local common_prefix = ""
+    local adapter = require 'neotest-gtest'
+    local roots = vim.tbl_map(adapter.root, self._paths)
+    while true do
+        local slash = roots[1]:find(Path.path.sep, #common_prefix + 1, true)
+        if slash == nil then return common_prefix end
+        local new_prefix = roots[1]:sub(1, slash)
+        for _, root in ipairs(roots) do
+            if not vim.startswith(root, new_prefix) then
+                return common_prefix
+            end
+        end
+        common = new_prefix
+    end
+
+end
+
+function Runner:recompile(opts) opts = vim.tbl_extend(opts or {}, {cwd = nil}) end
 
 function Runner:is_used()
     for _, owned_path in ipairs(self._paths) do

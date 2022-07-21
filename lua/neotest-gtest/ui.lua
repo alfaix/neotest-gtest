@@ -1,4 +1,6 @@
 local async = require("plenary.async")
+local lib = require("neotest.lib")
+
 local M = {}
 
 local input = async.wrap(vim.ui.input, 2)
@@ -120,6 +122,45 @@ function M.configure(fields, _)
         values[field.name] = inpt
     end
     return values, nil
+end
+
+-- This function is largely copypasted from neotest.consumers.output
+-- Their copyright and license are available at https://github.com/nvim-neotest/neotest
+function M.show_output(output, opts)
+    local buf = async.api.nvim_create_buf(false, true)
+    local chan = async.api.nvim_open_term(buf, {})
+    -- See https://github.com/neovim/neovim/issues/14557
+    local dos_newlines = string.find(output, "\r\n") ~= nil
+    async.api.nvim_chan_send(chan, dos_newlines and output or
+                                 output:gsub("\n", "\r\n"))
+    async.util.sleep(10) -- Wait for chan to send
+    local lines = async.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local width, height = 80, #lines
+    for i, line in ipairs(lines) do
+        if i > 500 then
+            break -- Don't want to parse very long output
+        end
+        local line_length = vim.str_utfindex(line)
+        if line_length > width then width = line_length end
+    end
+
+    local on_close = function()
+        pcall(vim.api.nvim_buf_delete, buf, {force = true})
+        pcall(vim.fn.chanclose, chan)
+    end
+    local float = lib.ui.float.open({
+        width = width,
+        height = height,
+        buffer = buf,
+        enter = opts.enter
+    })
+    float:listen("close", on_close)
+
+    async.api.nvim_buf_set_keymap(buf, "n", "q", "", {
+        noremap = true,
+        silent = true,
+        callback = function() pcall(vim.api.nvim_win_close, win, true) end
+    })
 end
 
 return M

@@ -8,6 +8,8 @@ protected:
   void fail() { EXPECT_TRUE(false); }
 };
 
+foo
+
 TEST_F(TestFixture, TestError) {
   doFoo();
   ASSERT_TRUE(false);
