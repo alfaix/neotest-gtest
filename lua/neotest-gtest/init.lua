@@ -40,89 +40,97 @@ local query = [[
 
 query = vim.treesitter.query.parse_query("cpp", query)
 
-local GTestNeotestAdapater = {name = "neotest-gtest"}
+local GTestNeotestAdapater = { name = "neotest-gtest" }
 GTestNeotestAdapater.root = lib.files.match_root_pattern(
-    "compile_commands.json", ".clangd", "init.lua", "init.vim", "build", ".git" -- TODO something else?
+	"compile_commands.json",
+	".clangd",
+	"init.lua",
+	"init.vim",
+	"build",
+	".git" -- TODO something else?
 )
 
 GTestNeotestAdapater.is_test_file = utils.is_test_file
 function GTestNeotestAdapater.discover_positions(path)
-    -- local project_root = GTestNeotestAdapater.root(path)
-    -- local gtest_executable = utils.get_gtest_executable(project_root)
-    return parse.parse_positions(path, query)
+	-- local project_root = GTestNeotestAdapater.root(path)
+	-- local gtest_executable = utils.get_gtest_executable(project_root)
+	return parse.parse_positions(path, query)
 end
 
 -- @param position neotest.Tree position to create a filter to
 -- @returns string
 local function position2filter(position)
-    local data = position:data()
-    local type = data.type
-    local posid = data.id
-    if type == "test" then
-        local test_kind = data.extra.kind
-        if test_kind == "TEST_P" then
-            -- TODO!!!
-            error("TEST_P is not yet supported, sorry :(")
-        else
-            local parts = vim.split(posid, "::", {plain = true})
-            assert(#parts == 3, "bad position")
-            -- local file = parts[1]
-            local namespace = parts[2]
-            local test_name = parts[3]
-            return string.format("%s.%s", namespace, test_name)
-        end
-    elseif type == "namespace" then
-        local parts = vim.split(posid, "::", {plain = true})
-        assert(#parts == 2, "bad position")
-        return data.name .. ".*"
-    elseif type == "file" then
-        -- Google Test does not support file filters. We collect all tests in
-        -- the file and run it that way. We can also only run the namespace,
-        -- however, Google Test does not restrict namespaces to be contained in
-        -- a single translation unit, and neither should we.
-        local filters = {}
-        for _, namespace in ipairs(position:children()) do
-            for _, test in ipairs(namespace:children()) do
-                filters[#filters + 1] = position2filter(test)
-            end
-        end
-        return table.concat(filters, ":")
-    elseif type == "dir" then
-        -- TODO figure this out. If all tests are under one runner, no issues
-        -- running this. If under multiple, either need to run multiple commands
-        -- or write a wrapper script (in python, probably).
-        -- If runners for some of them are not known, unclear what to do. Asking
-        -- for every file is probably not a great idea
-        return nil
-    else
-        error("unknown position type " .. type)
-    end
+	local data = position:data()
+	local type = data.type
+	local posid = data.id
+	if type == "test" then
+		local test_kind = data.extra.kind
+		if test_kind == "TEST_P" then
+			-- TODO!!!
+			error("TEST_P is not yet supported, sorry :(")
+		else
+			local parts = vim.split(posid, "::", { plain = true })
+			assert(#parts == 3, "bad position")
+			-- local file = parts[1]
+			local namespace = parts[2]
+			local test_name = parts[3]
+			return string.format("%s.%s", namespace, test_name)
+		end
+	elseif type == "namespace" then
+		local parts = vim.split(posid, "::", { plain = true })
+		assert(#parts == 2, "bad position")
+		return data.name .. ".*"
+	elseif type == "file" then
+		-- Google Test does not support file filters. We collect all tests in
+		-- the file and run it that way. We can also only run the namespace,
+		-- however, Google Test does not restrict namespaces to be contained in
+		-- a single translation unit, and neither should we.
+		local filters = {}
+		for _, namespace in ipairs(position:children()) do
+			for _, test in ipairs(namespace:children()) do
+				filters[#filters + 1] = position2filter(test)
+			end
+		end
+		return table.concat(filters, ":")
+	elseif type == "dir" then
+		-- TODO figure this out. If all tests are under one runner, no issues
+		-- running this. If under multiple, either need to run multiple commands
+		-- or write a wrapper script (in python, probably).
+		-- If runners for some of them are not known, unclear what to do. Asking
+		-- for every file is probably not a great idea
+		return nil
+	else
+		error("unknown position type " .. type)
+	end
 end
 
 function GTestNeotestAdapater.build_spec(args)
-    local position = args.tree
-    local root = GTestNeotestAdapater.root(position:data().path)
-    local cache = Cache:cache_for(root)
-    local logdir = cache:new_results_dir()
-    local results_path = logdir .. "/test_result.json"
-    local filter = position2filter(position)
-    if filter == nil then return nil end
-    local runner, err = runners.runner_for(position:data().path,
-                                           {interactive = true})
-    if runner == nil then
-        vim.notify(err, 3, {})
-        -- currently no way to cancel, have to show the error twice, and in
-        -- an ugly way at that
-        error("Failed to run tests: see previous notification")
-    end
-    local command = vim.tbl_flatten({
-        runner:executable(), "--gtest_output=json:" .. results_path,
-        "--gtest_filter=" .. filter, args.extra_args,
-        -- gtest doesn't print colors when begin redirected
-        -- but neotest keeps the colors nice and shiny. Thanks, neotest!
-        "--gtest_color=yes"
-    })
-    return {command = command, context = {results_path = results_path}}
+	local position = args.tree
+	local root = GTestNeotestAdapater.root(position:data().path)
+	local cache = Cache:cache_for(root)
+	local logdir = cache:new_results_dir()
+	local results_path = logdir .. "/test_result.json"
+	local filter = position2filter(position)
+	if filter == nil then
+		return nil
+	end
+	local runner, err = runners.runner_for(position:data().path, { interactive = true })
+	if runner == nil then
+		vim.notify(err, 3, {})
+		-- currently no way to cancel, have to show the error twice, and in
+		-- an ugly way at that
+		error("Failed to run tests: see previous notification")
+	end
+	local command = vim.tbl_flatten({
+		runner:executable(),
+		"--gtest_output=json:" .. results_path,
+		"--gtest_filter=" .. filter,
+		args.extra_args,
+		-- gtest doesn't print colors when begin redirected
+		-- but neotest keeps the colors nice and shiny. Thanks, neotest!
+		"--gtest_color=yes",
+	})
+	return { command = command, context = { results_path = results_path } }
 end
 
 ---@async
@@ -131,25 +139,29 @@ end
 ---@param tree neotest.Tree
 ---@return neotest.Result[]
 function GTestNeotestAdapater.results(spec, result, tree)
-    -- nothing ran
-    local success, data = pcall(lib.files.read, spec.context.results_path)
-    if not success then
-        vim.notify(string.format(
-            [[Gtest executable failed to produce a result. Command: %s, exit code: %d, output at: %s\n
+	-- nothing ran
+	local success, data = pcall(lib.files.read, spec.context.results_path)
+	if not success then
+		vim.notify(
+			string.format(
+				[[Gtest executable failed to produce a result. Command: %s, exit code: %d, output at: %s\n
             Please make sure any additional arguments supplied are correct and check the output for additional info.]],
-            table.concat(spec.command, " "), result.code, result.output))
-        return {}
-    end
-    local gtest_output = vim.json.decode(data) or {testsuites = {}}
-    local reports = {}
-    for _, testsuite in ipairs(gtest_output.testsuites) do
-        for _, test in ipairs(testsuite.testsuite) do
-            local report = Report:new(test, tree)
-            reports[report:position_id()] =
-                report:to_neotest_report(result.output)
-        end
-    end
-    return reports
+				table.concat(spec.command, " "),
+				result.code,
+				result.output
+			)
+		)
+		return {}
+	end
+	local gtest_output = vim.json.decode(data) or { testsuites = {} }
+	local reports = {}
+	for _, testsuite in ipairs(gtest_output.testsuites) do
+		for _, test in ipairs(testsuite.testsuite) do
+			local report = Report:new(test, tree)
+			reports[report:position_id()] = report:to_neotest_report(result.output)
+		end
+	end
+	return reports
 end
 
 return GTestNeotestAdapater
