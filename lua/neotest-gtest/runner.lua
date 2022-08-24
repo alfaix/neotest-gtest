@@ -56,6 +56,7 @@ function M.runner_for(path, opts)
         choice_idx, runner, error = M.register_runner(selected, nil, { path })
       else
         runner = selected
+        runner:add_path(path)
       end
     end
   else
@@ -74,6 +75,7 @@ function M.runner_for(path, opts)
   if not runner then
     return nil, "cancelled"
   end
+
   if choice_idx ~= nil then
     M._last_chosen = choice_idx
   end
@@ -254,7 +256,11 @@ function Runner:configure()
       completion = "file",
     },
   }
-  local user_input = ui.configure(fields)
+  local user_input, err = ui.configure(fields, nil)
+  if err == nil then
+    return false, err
+  end
+  assert(user_input ~= nil, "user_input should not be nil")
   self:set_executable(user_input.executable)
   local paths = utils.parse_words(user_input.paths)
   for _, path in ipairs(paths) do

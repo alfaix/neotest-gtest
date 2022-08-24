@@ -3,6 +3,11 @@ local M = {}
 
 local input = async.wrap(vim.ui.input, 2)
 
+--- Removes spaces from the start and the end of `str`
+local function trim(str)
+  return str:gsub("^%s*(.-)%s*$", "%1")
+end
+
 ---Prompts the user to select one of `options` or (optionally) enter a new value
 ---@param options any[] The list of options to choose from.
 ---@param default string? The default value to be entered
@@ -29,6 +34,7 @@ local function select_with_prompt(options, format, default, prompt, allow_string
     default = default and tostring(default) or nil,
     completion = completion,
   })
+  result = trim(result)
   if result == "q" or result == "" or result == nil then
     return nil, nil, nil
   end
@@ -84,6 +90,7 @@ function M.input(opts)
     default = opts.default,
     completion = opts.completion,
   })
+  inpt = trim(inpt)
 
   if inpt == nil or inpt == "q" or inpt == "" then
     return nil, nil
@@ -120,9 +127,6 @@ function M.configure(fields, _)
     })
     if err then
       return nil, err
-    end
-    if inpt == "" then
-      inpt = nil
     end
     if field.required and not inpt then
       return nil, string.format("required filled %s left empty", name)
