@@ -13,8 +13,6 @@ local input = async.wrap(vim.ui.input, 2)
 ---@return any The selected option or the entered string, if allowed
 ---@return string Error message, if any
 local function select_with_prompt(options, format, default, prompt, allow_string, completion)
-	-- NB: these aren't the user's options, these have been processed with
-	-- opts.format()
 	local lines = { prompt }
 	for i, opt in ipairs(options) do
 		lines[i + 1] = string.format("%d. %s", i, format(opt))

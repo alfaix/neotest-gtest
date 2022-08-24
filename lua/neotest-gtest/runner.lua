@@ -27,6 +27,7 @@ M._last_chosen = nil
 ---@return string|nil human-readable error (if any)
 function M.runner_for(path, opts)
 	opts = vim.tbl_extend("keep", opts or {}, { interactive = false })
+
 	for _, runner in ipairs(M._runners) do
 		if runner:owns(path) then
 			return runner
@@ -69,6 +70,9 @@ function M.runner_for(path, opts)
 	end
 	if error then
 		return nil, error
+	end
+	if not runner then
+		return nil, "cancelled"
 	end
 	if choice_idx ~= nil then
 		M._last_chosen = choice_idx

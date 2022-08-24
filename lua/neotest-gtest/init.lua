@@ -115,12 +115,10 @@ function GTestNeotestAdapater.build_spec(args)
 		return nil
 	end
 	local runner, err = runners.runner_for(position:data().path, { interactive = true })
-	if runner == nil then
-		vim.notify(err, 3, {})
-		-- currently no way to cancel, have to show the error twice, and in
-		-- an ugly way at that
-		error("Failed to run tests: see previous notification")
+	if err ~= nil then
+		error("Did not run tests: " .. err)
 	end
+	assert(runner ~= nil, "runner must not be nil with no error")
 	local command = vim.tbl_flatten({
 		runner:executable(),
 		"--gtest_output=json:" .. results_path,
