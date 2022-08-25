@@ -107,18 +107,26 @@ end
 function GTestNeotestAdapater.build_spec(args)
   local position = args.tree
   local root = GTestNeotestAdapater.root(position:data().path)
-  local cache = Cache:cache_for(root)
-  local logdir = cache:new_results_dir()
-  local results_path = logdir .. "/test_result.json"
-  local filter = position2filter(position)
-  if filter == nil then
-    return nil
+  local cache, new = Cache:cache_for(root)
+  if new then
+    runners.load_runners(cache:list_runners())
   end
+
+  local filter = position2filter(position)
+  if #filter == 0 then
+    error("no tests selected to run")
+  end
+
   local runner, err = runners.runner_for(position:data().path, { interactive = true })
   if err ~= nil then
     error("Did not run tests: " .. err)
   end
   assert(runner ~= nil, "runner must not be nil with no error")
+  cache:update(runner:executable(), runner:to_json())
+  cache:flush(false)
+
+  local logdir = cache:new_results_dir()
+  local results_path = logdir .. "/test_result.json"
   local command = vim.tbl_flatten({
     runner:executable(),
     "--gtest_output=json:" .. results_path,

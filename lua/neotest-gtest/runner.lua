@@ -17,6 +17,7 @@ local M = {}
 local Runner = {}
 
 M._runners = {}
+M._runners_executable2idx = {}
 M._last_chosen = nil
 
 ---Returns the runner for path `path`. If interactive is true and no runner is
@@ -108,19 +109,20 @@ function M.load_runners(data, opts)
   opts = vim.tbl_extend("keep", opts or {}, { clear = true, on_error = "notify" })
   local runners = {}
   for _, runner_info in ipairs(data) do
-    runners[#runners + 1], err =
-      Runner:new(runner_info.executable_path, runner_info.compile_command, runner_info.paths)
-    if opts.on_error == "propagate" then
-      return false, err
-    elseif opts.on_error == "notify" then
-      vim.notify(
-        string.format(
-          "Error loading executable at %s: %s",
-          runner_info.executable_path or "<nil>",
-          err
-        ),
-        3
-      )
+    runners[#runners + 1], err = Runner:from_json(runner_info)
+    if err then
+      if opts.on_error == "propagate" then
+        return false, err
+      elseif opts.on_error == "notify" then
+        vim.notify(
+          string.format(
+            "Error loading runner at %s: %s",
+            runner_info.executable_path or "<nil>",
+            err
+          ),
+          3
+        )
+      end
     end
   end
 
@@ -132,37 +134,18 @@ function M.load_runners(data, opts)
   return true
 end
 
----Returns json-friendly list of registered runners. If `include_unused` is false,
----(the default), runners with no files associated with them will not be returned.
----@param opts table Options, default: {include_unused = false}
----@return neotest-gtest.RunnerInfo[]
-function M.dump_runners(opts)
-  opts = vim.tbl_extend("keep", opts or {}, { include_unused = false })
-  local runners = {}
-  for _, runner in ipairs(M._runners) do
-    if opts.include_unused or runner:is_used() then
-      runners[#runners + 1] = {
-        executable_path = runner._run_command,
-        compile_command = runner._compile_command,
-        paths = runner._paths,
-      }
-    end
-  end
-  return runners
-end
-
 function M.register_runner(executable_path, compile_command, paths)
   executable_path = utils.normalize_path(executable_path)
-  for i, runner in ipairs(M._runners) do
-    if runner:executable() == executable_path then
-      for _, path in ipairs(paths) do
-        runner:add_path(path)
-      end
-      if compile_command then
-        runner._compile_command = compile_command
-      end
-      return i, runner
+  local i = M._runners_executable2idx[executable_path]
+  if i then
+    local runner = M._runners[i]
+    for _, path in ipairs(paths) do
+      runner:add_path(path)
     end
+    if compile_command then
+      runner._compile_command = compile_command
+    end
+    return i, runner
   end
 
   local runner, err = Runner:new(executable_path, compile_command, paths)
@@ -171,6 +154,7 @@ function M.register_runner(executable_path, compile_command, paths)
   end
   local new_idx = #M._runners + 1
   M._runners[new_idx] = runner
+  M._runners_executable2idx[executable_path] = new_idx
   return new_idx, runner, nil
 end
 
@@ -187,9 +171,25 @@ function Runner:new(executable_path, compile_command, paths)
   return runner, nil
 end
 
+---Builds a runner from a JSON table created by to_json()
+---@param data table JSON created by to_json()
+---@return table, string|nil Runner object, error message (if any)
+function Runner:from_json(data)
+  return self:new(data.executable_path, data.compile_command, data.paths)
+end
+
+function Runner:to_json()
+  return {
+    executable_path = self._executable_path,
+    compile_command = self._compile_command,
+    paths = self._paths,
+  }
+end
+
 function Runner:executable()
   return self._executable_path
 end
+
 function Runner:set_executable(executable_path)
   executable_path = utils.normalize_path(executable_path)
   local exists, err = utils.fexists(executable_path)
@@ -197,9 +197,14 @@ function Runner:set_executable(executable_path)
     -- could also be permission denied, print the error
     return false, string.format("Cannot find an executable at path %s: %s", executable_path, err)
   end
+  if self._executable_path then
+    M._runners_executable2idx[executable_path] = M._runners_executable2idx[self._executable_path]
+    M._runners_executable2idx[self._executable_path] = nil
+  end
   self._executable_path = executable_path
   return true, nil
 end
+
 function Runner:compile_command()
   return self._compile_command
 end
@@ -261,8 +266,11 @@ function Runner:configure()
     return false, err
   end
   assert(user_input ~= nil, "user_input should not be nil")
+  local paths, parse_err = utils.parse_words(user_input.paths)
+  if parse_err ~= nil then
+    return false, err
+  end
   self:set_executable(user_input.executable)
-  local paths = utils.parse_words(user_input.paths)
   for _, path in ipairs(paths) do
     self:add_path(path)
   end

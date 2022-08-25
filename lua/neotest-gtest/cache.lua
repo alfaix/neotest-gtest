@@ -29,12 +29,13 @@ function Cache:cache_for(path)
   if _loaded_caches[encoded_path] == nil then
     local full_path = string.format("%s/%s.json", cache_path, encoded_path)
     _loaded_caches[encoded_path] = Cache:new(full_path)
+    return _loaded_caches[encoded_path], true
   end
-  return _loaded_caches[encoded_path]
+  return _loaded_caches[encoded_path], false
 end
 
 function Cache:new(path)
-  local obj = { _path = path, _data = vim.empty_dict() }
+  local obj = { _path = path, _data = { runners = vim.empty_dict() }, _dirty = false }
   setmetatable(obj, { __index = Cache })
 
   local exists, _ = utils.fexists(path)
@@ -43,26 +44,68 @@ function Cache:new(path)
   else
     local json = read_sync(path)
     obj._data = json == "" and {} or vim.json.decode(json)
+    if obj._data.runners == nil then
+      obj._data.runners = vim.empty_dict()
+    end
   end
 
   return obj
 end
 
-function Cache:data()
-  return self._data
+local function json_eq(lhs, rhs)
+  if type(lhs) ~= type(rhs) then
+    return false
+  end
+
+  if type(lhs) == "table" then
+    local lhs_keys = vim.tbl_keys(lhs)
+    local rhs_keys = vim.tbl_keys(rhs)
+    if #lhs_keys ~= #rhs_keys then
+      return false
+    end
+    for key, value in pairs(lhs) do
+      if not json_eq(value, rhs[key]) then
+        return false
+      end
+    end
+  end
+
+  return lhs == rhs
 end
+
+function Cache:list_runners()
+  local runners = {}
+  for _, runner in pairs(self._data.runners) do
+    runners[#runners + 1] = runner
+  end
+  return runners
+end
+
+function Cache:update(key, value)
+  local old_data = self._data[key]
+  if not json_eq(old_data, value) then
+    self._data.runners[key] = value
+    self._dirty = true
+  end
+end
+
 function Cache:path()
   return self._path
 end
 
-function Cache:flush()
+---Flushes the cache to disk.
+---@param force boolean if true, forces the cache to be flushed even if it's not dirty
+function Cache:flush(force)
+  if not self._dirty and not force then
+    return
+  end
   local as_json = vim.json.encode(self._data)
   if as_json == nil then
     return
   end
   local file_fd = assert(vim.loop.fs_open(self._path, "w", cache_mode))
-  local bytes = assert(vim.loop.fs_write(file_fd, as_json, 0))
-  assert(bytes == #as_json, bytes)
+  local nbytes = assert(vim.loop.fs_write(file_fd, as_json, 0))
+  assert(nbytes == #as_json, nbytes)
   assert(vim.loop.fs_close(file_fd))
 end
 
@@ -70,7 +113,7 @@ local function symlink(path, new_path)
   if not IS_WINDOWS then
     vim.loop.fs_symlink(path, new_path)
   end
-  -- otherwise just don't bother
+  -- otherwise just don't bother: only used for user's convenience
 end
 
 function Cache:new_results_dir(opts)
@@ -93,9 +136,10 @@ function Cache:new_results_dir(opts)
     return path2nr(l) > path2nr(r)
   end)
   for i = opts.history_size, #existing_paths do
+    local path = existing_paths[i]
     -- making sure we don't remove something important
-    assert(existing_paths[i]:match("%/googletest%-of.*%/neotest%-gtest%-run%-%d+$"))
-    Path:new(existing_paths[i]):rm({ recusrive = true })
+    assert(path:match("%/googletest%-of.*%/neotest%-gtest%-run%-%d+$"))
+    Path:new(path):rm({ recusrive = true })
   end
 
   local new_nr

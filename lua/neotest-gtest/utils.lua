@@ -44,7 +44,6 @@ end
 
 function M.encode_path(path)
   path = M.normalize_path(path)
-  -- there are never two slashes in a row: path is normalized. Replace slash
   local encoded = path:gsub("%%", "%%1")
   encoded = encoded:gsub("%" .. Path.path.sep, "%%0")
   return encoded
