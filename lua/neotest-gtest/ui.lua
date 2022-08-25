@@ -34,7 +34,7 @@ local function select_with_prompt(options, format, default, prompt, allow_string
     default = default and tostring(default) or nil,
     completion = completion,
   })
-  result = trim(result)
+  result = result and trim(result)
   if result == "q" or result == "" or result == nil then
     return nil, nil, nil
   end
@@ -90,7 +90,7 @@ function M.input(opts)
     default = opts.default,
     completion = opts.completion,
   })
-  inpt = trim(inpt)
+  inpt = inpt and trim(inpt)
 
   if inpt == nil or inpt == "q" or inpt == "" then
     return nil, nil

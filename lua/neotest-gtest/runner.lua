@@ -219,7 +219,13 @@ end
 ---@return boolean
 local function _is_parent(parent, child)
   local is_prefix = vim.startswith(child, parent)
-  return is_prefix and (#parent == #child or child:sub(#parent + 1, #parent + 1) == Path.path.sep)
+  return is_prefix
+    and (
+      #parent == #child -- same path
+      or parent:sub(#parent, #parent) == Path.path.sep -- parent ends with /
+      -- parent is a directory, next symbol in child is /
+      or child:sub(#parent + 1, #parent + 1) == Path.path.sep
+    )
 end
 
 function Runner:owns(path)
@@ -262,7 +268,7 @@ function Runner:configure()
     },
   }
   local user_input, err = ui.configure(fields, nil)
-  if err == nil then
+  if err ~= nil then
     return false, err
   end
   assert(user_input ~= nil, "user_input should not be nil")
@@ -271,6 +277,7 @@ function Runner:configure()
     return false, err
   end
   self:set_executable(user_input.executable)
+  self._paths = {}
   for _, path in ipairs(paths) do
     self:add_path(path)
   end

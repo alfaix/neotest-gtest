@@ -6,7 +6,7 @@ local Cache = require("neotest-gtest.cache")
 local runners = require("neotest-gtest.runner")
 
 -- treesitter matches TEST macros as function definitions
--- treesitter cannot possible know about macros defined in other files, so this
+-- treesitter cannot possibly know about macros defined in other files, so this
 -- is the best we can do. It works pretty well though.
 -- under C standard, they are valid definitions with implicit int return type
 -- (and with proper compiler flags the CPP code should also compile which should
