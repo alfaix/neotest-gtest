@@ -41,6 +41,13 @@ TEST(TestOne, TestExceptionFailure) {
   throw std::runtime_error("oh no!");
 }
 
+TEST(TestOne, TestThrowInteger) {
+  fillthisline();
+  throw 0;
+}
+
+// TODO death tests
+
 TEST(TestOne, TestMultipleFailures) {
   EXPECT_TRUE(false);
   EXPECT_FALSE(true);
