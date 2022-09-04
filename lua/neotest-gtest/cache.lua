@@ -40,7 +40,7 @@ function Cache:new(path)
 
   local exists, _ = utils.fexists(path)
   if not exists then
-    obj:flush() -- create the file
+    obj:flush(true) -- create the file
   else
     local json = read_sync(path)
     obj._data = json == "" and {} or vim.json.decode(json)
@@ -68,6 +68,7 @@ local function json_eq(lhs, rhs)
         return false
       end
     end
+    return true
   end
 
   return lhs == rhs
@@ -82,7 +83,7 @@ function Cache:list_runners()
 end
 
 function Cache:update(key, value)
-  local old_data = self._data[key]
+  local old_data = self._data.runners[key]
   if not json_eq(old_data, value) then
     self._data.runners[key] = value
     self._dirty = true
@@ -91,6 +92,10 @@ end
 
 function Cache:path()
   return self._path
+end
+
+function Cache:is_dirty()
+  return self._dirty
 end
 
 ---Flushes the cache to disk.
@@ -107,6 +112,7 @@ function Cache:flush(force)
   local nbytes = assert(vim.loop.fs_write(file_fd, as_json, 0))
   assert(nbytes == #as_json, nbytes)
   assert(vim.loop.fs_close(file_fd))
+  self._dirty = false
 end
 
 local function symlink(path, new_path)

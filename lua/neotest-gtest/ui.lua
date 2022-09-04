@@ -129,7 +129,7 @@ function M.configure(fields, _)
       return nil, err
     end
     if field.required and not inpt then
-      return nil, string.format("required filled %s left empty", name)
+      return nil, string.format("%s required but empty", name)
     end
     values[field.name] = inpt
   end

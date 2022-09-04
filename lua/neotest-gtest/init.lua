@@ -106,7 +106,8 @@ end
 
 function GTestNeotestAdapater.build_spec(args)
   local position = args.tree
-  local root = GTestNeotestAdapater.root(position:data().path)
+  local path = position:data().path
+  local root = GTestNeotestAdapater.root(path)
   local cache, new = Cache:cache_for(root)
   if new then
     runners.load_runners(cache:list_runners())
@@ -114,10 +115,18 @@ function GTestNeotestAdapater.build_spec(args)
 
   local filter = position2filter(position)
   if #filter == 0 then
-    error("no tests selected to run")
+    error("Did not run tests: no tests selected to run")
   end
 
-  local runner, err = runners.runner_for(position:data().path, { interactive = true })
+  local runner, err = runners.ui.runner_for(path)
+  if runner == nil and err == nil then -- requested a new one
+    runner, err = runners.ui.new({ paths = { path } })
+  else
+    -- If the runner was chosen interactively, this is needed. Otherwise,
+    -- i.e., if the runner has been selected before, this does nothing
+    -- this never fails
+    runner:add_path(path)
+  end
   if err ~= nil then
     error("Did not run tests: " .. err)
   end
