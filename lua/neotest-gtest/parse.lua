@@ -3,13 +3,21 @@ local M = {}
 
 local async = require("neotest.async")
 local files = require("neotest.lib").files
-local neots = require("neotest.lib").treesitter
 local types = require("neotest.types")
 
 local Tree = types.Tree
-local Queue = types.FIFOQueue
 
-local function extract_captures(query, source, root)
+---Extracts test positions from a source using the given query
+---@param query vim.treesitter.Query The query to use
+---@param source string The text of the source file.
+---@param root vim.treesitter.LanguageTree The root of the tree
+---@return table
+---@return table
+local function extract_captures(
+  query, --@as table
+  source,
+  root
+)
   -- Namespace definition doesn't really exist as namespace is a made up
   -- construct in GTest used only to group tests together. We set its range
   -- from start of first test to end of last test.
@@ -56,6 +64,8 @@ local function extract_captures(query, source, root)
 end
 
 -- TODO support TEST_P and use the index in the name (0/1/2/3)
+---Create a unique id for a position by concatenating its name with names of its
+---parents.
 ---@param position neotest.Position The position to return an ID for
 ---@param parents neotest.Position[] Parent positions for the position
 local function position_id(position, parents)
@@ -72,6 +82,12 @@ end
 -- We only have three levels: file, namespace, test
 -- We can consider making TEST_P into a nested namespace but that's probably a
 -- bad idea. I do not understand the implcations yet.
+
+---Builds a tree from a list of namespaces and tests extracted from
+---the file represented by `fileobj`.
+---@param fileobj neotest.Position The file to build the tree for
+---@param tests any
+---@return table
 local function build_tree(fileobj, namespaces, tests)
   local tree = { fileobj }
   local namespace2idx = {}
@@ -119,7 +135,7 @@ function M.parse_positions_from_string(file_path, query, content)
   local ft = files.detect_filetype(file_path)
   local lang = require("nvim-treesitter.parsers").ft_to_lang(ft)
   async.util.scheduler()
-  local parser = vim.treesitter.get_string_parser(content, lang)
+  local parser = vim.treesitter.get_string_parser(content, lang, nil)
   local root = parser:parse()[1]:root()
   local tests_tree = collect_tests(file_path, query, content, root)
   local tree = Tree.from_list(tests_tree, function(pos)

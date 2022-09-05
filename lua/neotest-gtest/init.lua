@@ -104,6 +104,14 @@ local function position2filter(position)
   end
 end
 
+function GTestNeotestAdapater.update_cache(root, executable, runner)
+  local cache, new = Cache:cache_for(root)
+  if new then
+    cache:load_runners(cache:list_runners())
+  end
+  cache:update(executable, runner)
+end
+
 function GTestNeotestAdapater.build_spec(args)
   local position = args.tree
   local path = position:data().path

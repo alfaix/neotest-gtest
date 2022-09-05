@@ -5,18 +5,6 @@ local ui = require("neotest-gtest.ui")
 
 local M = {}
 
---- Exposed UI:
---- M.ui.select_runner
---- M.ui.configure
---- M.ui.new
---- M.ui.drop
---
---- Exposed API
---- M.find_runners
---- M.drop_runner
---- M.add_runner
---- M.load_runners
-
 ---@class neotest-gtest.RunnerInfo
 ---@field private executable_path string
 ---@field private paths string[]
@@ -26,6 +14,7 @@ local M = {}
 ---@field private _paths string[]
 local Runner = {}
 
+---@type neotest-gtest.Runner[]
 M._runners = {}
 M._runners_executable2idx = {}
 M._last_chosen = nil
@@ -44,7 +33,7 @@ end
 ---Asks the user to fill information about a new runner and returns it.
 ---@param default_values neotest-gtest.RunnerDefaults
 ---@return neotest-gtest.Runner|nil Runner if creation succeeded
----@return string|nil error (if any)
+---@return string|nil error (if any). nil, nil is not a valid combination.
 local function new_runner(default_values)
   local fields = {
     {
@@ -81,10 +70,25 @@ end
 
 local RunnerUI = {}
 
+---@class neotest-gtest.SelectRunnerOptions
+---@field public suggest_create? boolean If true, the first option will suggest creating a new runner.
+---@field public default_idx number? If specified, the default option will be the one at this index.
+---@field public with_last_used? boolean If true, the last used runner will be added to the list of options.
+---       default_idx is ignored if this is true.
+---@field public prompt string? The prompt showed to the user. "Select a runner" is the default.
+
+---Prompts the user to select a runner out of `list`
+---@param list neotest-gtest.Runner[]? List of runners to choose from. If nil, all runners are used.
+---@param opts neotest-gtest.SelectRunnerOptions?
+---@return neotest-gtest.Runner? The selected runner, or nir in case of an error or cancellation
+---@return string|nil Error message, or nil if no error occurred
+---@note If the user chooses to create a new runner (only if suggest_create=true), (nil, nil) will be returned.
+---      With suggest_create=false, (nil, nil) is not a valid return value.
 function RunnerUI.select_runner(list, opts)
   if list == nil then
     list = M._runners
   end
+  opts = opts or {}
   local options
   if opts.suggest_create then
     options = { "Create a new runner" }
@@ -125,12 +129,23 @@ function RunnerUI.select_runner(list, opts)
     choice_idx = choice_idx - 1
   end
 
+  -- appeasing the type checker: this is checked above
+  assert(list ~= nil, "list must not be nil")
   local chosen = list[choice_idx]
   M._last_chosen = M._runners_executable2idx[chosen:executable()]
   return chosen, nil
 end
 
--- Kinda tested
+---Returns a runner registered for `path`, or prompts the user to select one.
+---
+---The user may also choose to create a new runner, in which case `(nil, nil)`
+---is returned. If the user selects a runner, it is remembered as the runner for
+---the file at `path`, and the next time this method will return the same runner
+---without prompting the user.
+---
+---@param path string Path to the test file for which the runner is required.
+---@return neotest-gtest.Runner|nil Runner (if found or selected)
+---@return string|nil Error (if any, e.g. user cancelling or invalid input)
 function RunnerUI.runner_for(path)
   if #M._runners == 0 then
     return nil, nil -- act as if the user requested to create a new one
@@ -152,7 +167,10 @@ function RunnerUI.runner_for(path)
   })
 end
 
--- Kinda tested
+---Prompts the user to configure one of the existing runners or create a new one.
+---Will handle the internal registry of runners to stay consistent
+---@return neotest-gtest.Runner|nil The configured/created runner (if any)
+---@return string|nil error (if any)
 function RunnerUI.configure()
   local selected, error = RunnerUI.select_runner(nil, {
     prompt = "Select a runner to configure",
@@ -163,7 +181,7 @@ function RunnerUI.configure()
     return nil, error
   end
   if selected == nil then
-    return RunnerUI.new()
+    return RunnerUI.new({})
   end
 
   local defaults = {
@@ -174,7 +192,7 @@ function RunnerUI.configure()
   local new
   new, error = new_runner(defaults)
   if error ~= nil then
-    return error
+    return nil, error
   end
   assert(new ~= nil, "new runner must not be nil")
 
@@ -185,9 +203,15 @@ function RunnerUI.configure()
     selected._executable_path = new._executable_path
   end
   selected._paths = new._paths
+  return selected, nil
 end
 
--- Kinda tested
+---Prompts the user to create a new runner.
+---If the user enters a path that already belongs to a runner, will add all
+---the test source file paths to the existing runner instead of creating a new one.
+---@param defaults neotest-gtest.RunnerDefaults default values for the prompt
+---@return neotest-gtest.Runner|nil The newly created runner if there was no error.
+---@return string string|nil Error (if any)
 function RunnerUI.new(defaults)
   defaults = defaults or {}
   local new, error = new_runner(defaults)
@@ -199,23 +223,22 @@ function RunnerUI.new(defaults)
   -- If the user entered an existing executable path, just update all the paths
   if M._runners_executable2idx[new._executable_path] ~= nil then
     vim.notify(
-      string.format(
-        "Runner at path %s already exists, updating paths instead",
-        new._executable_path
-      ),
+      string.format("Runner at path %s already exists, updating paths instead", new:executable()),
       2
     )
     local existing = M._runners[M._runners_executable2idx[new._executable_path]]
     for _, path in ipairs(new._paths) do
       existing:add_path(path)
     end
-    return existing
+    return existing, nil
   end
 
   return M.add_runner(new)
 end
 
--- Kinda tested
+---Prompts the user to delete a runner from the internal registry.
+---@return neotest-gtest.Runner|nil the deleted runner (if any)
+---@return string|nil error (if any)
 function RunnerUI.drop()
   if #M._runners == 0 then
     return nil, "No runners to drop"
@@ -360,6 +383,18 @@ function M.load_runners(data, opts) -- kinda tested
   return true
 end
 
+---Creates a new runner at the given path that owns given source files.
+---
+---Will fail if the executable doesn't exist, but allows the paths to not exist.
+---@param executable_path string path to the Google Test executable.
+---@param paths string test source files that compile into the executable
+---@return neotest-gtest.Runner|nil the runner if created successfully
+---@return string|nil error (if any)
+
+--TODO the executable may not be compiled (yet) and this will throw, which in turn
+--can mess with the cache. Perhaps we should just warn if the executable doesn't exist?
+--Alternatively, we should prompt "are you sure?" during creation if it doesn't exist
+--Basically, a non-existing executable is a valid use case, but we still want to save the user from typos
 function Runner:new(executable_path, paths)
   local runner = { _paths = {} }
   setmetatable(runner, { __index = Runner })
@@ -380,6 +415,8 @@ function Runner:from_json(data)
   return self:new(data.executable_path, data.paths)
 end
 
+---Converts the runner to a JSON-serializeable table.
+---@return table JSON-serializeable table representing the runner
 function Runner:to_json()
   return {
     executable_path = self._executable_path,
@@ -387,10 +424,19 @@ function Runner:to_json()
   }
 end
 
+---Returns the normalized path of the executable as a string.
+---
+---It is guaranteed that all paths to the same file will result in an identical
+---string.
 function Runner:executable()
   return self._executable_path
 end
 
+---Sets the path of the underlying Google Test executable to `executable_path`.
+---Fails if the executable does not exist.
+---@param executable_path string
+---@return boolean ok/not ok
+---@return string|nil error message (if any)
 function Runner:_set_executable(executable_path)
   executable_path = utils.normalize_path(executable_path)
   local exists, err = utils.fexists(executable_path)
@@ -418,6 +464,11 @@ local function _is_parent(parent, child)
     )
 end
 
+---Checks whether the runner owns the given path. I.e., if a test file at `path`
+---compiles into the executable at `self:executable()` by keeping track of all
+---such files ultimately manually specified by the user.
+---@param path any
+---@return boolean
 function Runner:owns(path)
   path = utils.normalize_path(path)
   for _, owned_path in ipairs(self._paths) do
@@ -460,6 +511,8 @@ function Runner:add_path(path)
   end
 end
 
+---Checks if any of owned paths exist
+---@return boolean True if the runner is used, false otherwise
 function Runner:is_used()
   for _, owned_path in ipairs(self._paths) do
     local pathobj = Path:new(owned_path)

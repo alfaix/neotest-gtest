@@ -13,6 +13,9 @@ local permissions_table = {
   tonumber("00001", 8),
 }
 
+---Creates a permissions mode number from a string.
+---@param str string in the format "rwxrwxrwx", where any letter can be "-" to indicate no permission. Note that the letters themselves are ignored, only order matters.
+---@return integer the permissions mode number
 local function permissions(str)
   assert(#str == #permissions_table, "mode string mut have 9 chars, e.g. rw-rwxrwx")
   local mode = 0
