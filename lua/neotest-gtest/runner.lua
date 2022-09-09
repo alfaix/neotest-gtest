@@ -410,7 +410,7 @@ end
 
 ---Builds a runner from a JSON table created by to_json()
 ---@param data table JSON created by to_json()
----@return table, string|nil Runner object, error message (if any)
+---@return neotest-gtest.Runner|nil, string|nil Runner object, error message (if any)
 function Runner:from_json(data)
   return self:new(data.executable_path, data.paths)
 end
@@ -533,6 +533,12 @@ function Runner:is_used()
     end
   end
   return false
+end
+
+function Runner:paths()
+  return vim.tbl_map(function(x)
+    return x
+  end, self._paths)
 end
 
 M.Runner = Runner

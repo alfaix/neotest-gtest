@@ -1,3 +1,10 @@
+-- TODO
+-- 1. documentation + tests
+-- 2. UI improvements: vim.select UI, allow clearing cache, etc.
+-- 3. Detect outdated executable
+-- 4. TEST_P
+-- 5. Debugging
+
 local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local parse = require("neotest-gtest.parse")

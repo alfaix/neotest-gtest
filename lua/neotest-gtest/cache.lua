@@ -1,18 +1,18 @@
 local utils = require("neotest-gtest.utils")
-local async = require("neotest.async")
 local Path = require("plenary.path")
 local scandir = require("plenary.scandir")
-local permissions = require("neotest-gtest.permissions")
 
 local stddata = vim.fn.stdpath("data")
 local runs_dir = Path:new(stddata .. "/neotest-gtest/runs")
 local IS_WINDOWS = vim.fn.has("win32") == 1
-local cache_mode = permissions("rw-r--r--")
+local cache_mode = utils.permissions("rw-r--r--")
 local user_name = vim.env.USER
 
 local Cache = {}
 local _loaded_caches = {}
 
+-- I think this might've been true for the old autocmd flush stuff, but no longer true.
+-- TODO: move to async stuff if it can be used
 -- can't use async.uv.something because the rest of the handler is called in the callback
 local function read_sync(file_path)
   local file_fd = assert(vim.loop.fs_open(file_path, "r", 438))
@@ -75,11 +75,7 @@ local function json_eq(lhs, rhs)
 end
 
 function Cache:list_runners()
-  local runners = {}
-  for _, runner in pairs(self._data.runners) do
-    runners[#runners + 1] = runner
-  end
-  return runners
+  return self._data.runners
 end
 
 function Cache:update(key, value)
@@ -100,7 +96,7 @@ end
 
 ---Flushes the cache to disk.
 ---@param force boolean if true, forces the cache to be flushed even if it's not dirty
-function Cache:flush(force)
+function Cache:flush(force, sync)
   if not self._dirty and not force then
     return
   end
@@ -111,8 +107,15 @@ function Cache:flush(force)
   local file_fd = assert(vim.loop.fs_open(self._path, "w", cache_mode))
   local nbytes = assert(vim.loop.fs_write(file_fd, as_json, 0))
   assert(nbytes == #as_json, nbytes)
+  if sync then
+    assert(vim.loop.fs_fsync(file_fd))
+  end
   assert(vim.loop.fs_close(file_fd))
   self._dirty = false
+end
+
+function Cache:drop()
+  return vim.loop.fs_unlink(self._path)
 end
 
 local function symlink(path, new_path)

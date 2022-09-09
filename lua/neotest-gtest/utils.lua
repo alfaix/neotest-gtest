@@ -8,6 +8,44 @@ M.test_extensions = {
   ["c++"] = true,
 }
 
+---@class neotest-gtest.mtime
+---@field sec number Unix timestamp of file's mtime
+---@field nsec number Nanosecond offset of file's mtime from the star of the second
+
+---Compares mtimes `lhs` and `rhs`, returning true if `lhs` is smaller.
+---@param lhs neotest-gtest.mtime First mtime to compare
+---@param rhs neotest-gtest.mtime Second mtime to compare
+---@return boolean Whether `lhs` is smaller than `rhs`
+function M.mtime_lt(lhs, rhs)
+  if lhs.sec < rhs.sec then
+    return true
+  end
+  if lhs.sec == rhs.sec then
+    return lhs.nsec < rhs.nsec
+  end
+  return false
+end
+
+---Compares mtimes `lhs` and `rhs`, returning true if they are equal
+---@param lhs neotest-gtest.mtime First mtime to compare
+---@param rhs neotest-gtest.mtime Second mtime to compare
+---@return boolean Whether `lhs` is equal to `rhs`
+function M.mtime_eq(lhs, rhs)
+  return lhs.sec == rhs.sec and lhs.nsec == rhs.nsec
+end
+
+---Returns mtime table for the file at `path`
+---@param path string path to the file to inspect
+---@return neotest-gtest.mtime mtime table for the file at `path`
+---@return string error message if an error occurred
+function M.getmtime(path)
+  local stat, e = vim.loop.fs_stat(path)
+  if e then
+    return nil, e
+  end
+  return stat.mtime, nil
+end
+
 ---Check if a file at path `path` exists and is a regular file.
 ---@param path string The path to check
 ---@return boolean whether the path leads to a regular file
@@ -41,7 +79,8 @@ function M.is_test_file(file_path)
   local extension = extsplit[#extsplit]
   local fname_last_part = extsplit[#extsplit - 1]
   local result = M.test_extensions[extension]
-    and (vim.startswith(filename, "test_") or vim.endswith(fname_last_part, "_test"))
+      and (vim.startswith(filename, "test_") or vim.endswith(fname_last_part, "_test"))
+    or false
   return result
 end
 
@@ -56,6 +95,9 @@ end
 function M.normalize_path(path)
   if path:sub(1, 1) == "~" and (path:sub(2, 2) == Path.path.sep or #path == 1) then
     path = vim.loop.os_getenv("HOME") .. path:sub(2)
+  end
+  if #path ~= 1 and vim.endswith(path, Path.path.sep) then
+    path = path:sub(1, -2)
   end
   return Path:new(path):absolute()
 end
@@ -115,6 +157,35 @@ function M.parse_words(inpt)
     return nil, "unterminated quote"
   end
   return words, nil
+end
+
+local permissions_table = {
+  -- user r/w/x
+  tonumber("00400", 8),
+  tonumber("00200", 8),
+  tonumber("00100", 8),
+  -- group r/w/x
+  tonumber("00040", 8),
+  tonumber("00020", 8),
+  tonumber("00010", 8),
+  -- others r/w/x
+  tonumber("00004", 8),
+  tonumber("00002", 8),
+  tonumber("00001", 8),
+}
+
+---Creates a permissions mode number from a string.
+---@param str string in the format "rwxrwxrwx", where any letter can be "-" to indicate no permission. Note that the letters themselves are ignored, only order matters.
+---@return integer the permissions mode number
+function M.permissions(str)
+  assert(#str == #permissions_table, "mode string mut have 9 chars, e.g. rw-rwxrwx")
+  local mode = 0
+  for i = 1, #str do
+    if str:sub(i, i) ~= "-" then
+      mode = bit.bor(mode, permissions_table[i])
+    end
+  end
+  return mode
 end
 
 return M
