@@ -2,19 +2,24 @@
 # https://stackoverflow.com/questions/18136918/how-to-get-current-relative-directory-of-your-makefile
 SHELL := /bin/bash
 pwd := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
-build: test_one.cpp test_two.cpp
+
+build: gtest test_one.cpp test_two.cpp
 	c++ -Og build/test_one.cpp.o build/test_two.cpp.o \
-		-lgtest_main -lgtest -lpthread \
-		${CXXFLAGS} \
-		${LDFLAGS} \
+		-L${pwd}/googletest/build/lib \
+		-lgtest_main \
+		-lgtest \
+		-lpthread \
 		-o build/test-executable  
 
+
+gtest: googletest
+	cmake -S ${pwd}/googletest -B ${pwd}/googletest/build -DCMAKE_BUILD_TYPE=Release && \
+		cmake --build ${pwd}/googletest/build
+
 test_one.cpp:
-	c++ -Og -I${pwd}/src/ -o ${pwd}/build/test_one.cpp.o \
-		${CXXFLAGS} \
+	mkdir -p build/ && c++ -Og -I${pwd}/src/ -isystem ${pwd}/googletest/googletest/include -o ${pwd}/build/test_one.cpp.o \
 		-c ${pwd}/src/test_one.cpp
 
 test_two.cpp:
-	c++ -Og -I${pwd}/src/ -o ${pwd}/build/test_two.cpp.o \
-		${CXXFLAGS} \
+	mkdir -p build/ && c++ -Og -I${pwd}/src/ -isystem ${pwd}/googletest/googletest/include -o ${pwd}/build/test_two.cpp.o \
 		-c ${pwd}/src/test_two.cpp
