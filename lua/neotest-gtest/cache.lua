@@ -4,9 +4,14 @@ local scandir = require("plenary.scandir")
 
 local stddata = vim.fn.stdpath("data")
 local runs_dir = Path:new(stddata .. "/neotest-gtest/runs")
+local cache_path = stddata .. "/neotest-gtest"
 local IS_WINDOWS = vim.fn.has("win32") == 1
-local cache_mode = utils.permissions("rw-r--r--")
+local cache_mode = utils.permissions("rw-------")
+local cache_mode_dir = utils.permissions("rwx------")
 local user_name = vim.env.USER
+
+Path:new(cache_path):mkdir({exist_ok=true, mode = cache_mode_dir})
+Path:new(runs_dir):mkdir({exist_ok=true, mode = cache_mode_dir})
 
 local Cache = {}
 local _loaded_caches = {}
@@ -22,7 +27,6 @@ local function read_sync(file_path)
   return data
 end
 
-local cache_path = stddata .. "/neotest-gtest"
 
 function Cache:cache_for(path)
   local encoded_path = utils.encode_path(path)

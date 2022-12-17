@@ -61,6 +61,7 @@ describe("cache library", function()
 
     cache:drop()
   end)
+
   it("different caches do not conflict with each other", function()
     local cache, _ = Cache:cache_for("/tmppath")
     -- NB: path is normalized
