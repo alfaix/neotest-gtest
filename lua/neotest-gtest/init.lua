@@ -48,19 +48,8 @@ local query = [[
 query = vim.treesitter.query.parse_query("cpp", query)
 
 local GTestNeotestAdapater = { name = "neotest-gtest" }
-GTestNeotestAdapater.root = lib.files.match_root_pattern(
-  "compile_commands.json",
-  ".clangd",
-  "init.lua",
-  "init.vim",
-  "build",
-  ".git" -- TODO something else?
-)
-
 GTestNeotestAdapater.is_test_file = utils.is_test_file
 function GTestNeotestAdapater.discover_positions(path)
-  -- local project_root = GTestNeotestAdapater.root(path)
-  -- local gtest_executable = utils.get_gtest_executable(project_root)
   return parse.parse_positions(path, query)
 end
 
@@ -136,16 +125,17 @@ function GTestNeotestAdapater.build_spec(args)
   local runner, err = runners.ui.runner_for(path)
   if runner == nil and err == nil then -- requested a new one
     runner, err = runners.ui.new({ paths = { path } })
-  else
+  elseif runner ~= nil then
+    assert(err == nil, err)
     -- If the runner was chosen interactively, this is needed. Otherwise,
     -- i.e., if the runner has been selected before, this does nothing
     -- this never fails
     runner:add_path(path)
-  end
-  if err ~= nil then
+  elseif runner == nil then
+    error("GTest executable not specified or does not exist")
+  else
     error("Did not run tests: " .. err)
   end
-  assert(runner ~= nil, "runner must not be nil with no error")
   cache:update(runner:executable(), runner:to_json())
   cache:flush(false)
 
@@ -193,5 +183,24 @@ function GTestNeotestAdapater.results(spec, result, tree)
   end
   return reports
 end
+
+function GTestNeotestAdapater.setup(config)
+  local default_config = {
+    root = lib.files.match_root_pattern(
+      "compile_commands.json",
+      "compile_flags.txt",
+      ".clangd",
+      "init.lua",
+      "init.vim",
+      "build", ".git"
+    ),
+    is_test_file = utils.is_test_file
+  }
+  config = vim.tbl_deep_extend("keep", config, default_config)
+  GTestNeotestAdapater.root = config.root
+  GTestNeotestAdapater.is_test_file = config.is_test_file
+  return GTestNeotestAdapater
+end
+
 
 return GTestNeotestAdapater

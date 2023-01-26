@@ -6,6 +6,7 @@ local files = require("neotest.lib").files
 local types = require("neotest.types")
 
 local Tree = types.Tree
+local injections_text = nil
 
 ---Extracts test positions from a source using the given query
 ---@param query vim.treesitter.Query The query to use
@@ -136,7 +137,17 @@ function M.parse_positions_from_string(file_path, query, content)
   local lang = require("nvim-treesitter.parsers").ft_to_lang(ft)
   async.util.scheduler()
   local parser = vim.treesitter.get_string_parser(content, lang, nil)
+  -- Workaround for https://github.com/neovim/neovim/issues/21275
+  -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
+  if injections_text == nil then
+    -- TODO can there be more than one?...
+    local injection_file = vim.treesitter.get_query_files('cpp', 'injections')[1]
+    injections_text = files.read(injection_file)
+    print("injections_text:", vim.inspect(injections_text))
+  end
+  vim.treesitter.set_query('cpp', 'injections', '')
   local root = parser:parse()[1]:root()
+  vim.treesitter.set_query('cpp', 'injections', injections_text)
   local tests_tree = collect_tests(file_path, query, content, root)
   local tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
