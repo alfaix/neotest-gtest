@@ -143,7 +143,6 @@ function M.parse_positions_from_string(file_path, query, content)
     -- TODO can there be more than one?...
     local injection_file = vim.treesitter.get_query_files('cpp', 'injections')[1]
     injections_text = files.read(injection_file)
-    print("injections_text:", vim.inspect(injections_text))
   end
   vim.treesitter.set_query('cpp', 'injections', '')
   local root = parser:parse()[1]:root()
