@@ -1,3 +1,5 @@
+local utils = require("neotest-gtest.utils")
+
 local Report = {}
 
 local header_size = 80 -- TODO allow configuring these
@@ -35,7 +37,8 @@ end
 function Report:position_id()
   if self._position_id == nil then
     local test = self:data()
-    self._position_id = table.concat({ test.file, test.classname, test.name }, "::")
+    local abs_file = utils.normalize_path(test.file)
+    self._position_id = table.concat({ abs_file, test.classname, test.name }, "::")
   end
   return self._position_id
 end
