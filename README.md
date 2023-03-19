@@ -1,8 +1,13 @@
 # neotest-gtest
+
 A **work-in-progress** implementation of a [Google Test](https://github.com/google/googletest) adapter for [neotest](https://github.com/nvim-neotest/neotest).
 
 It works, but is a little rough around the edges. See the roadmap to a full-featured plugin [here](https://github.com/alfaix/neotest-gtest/issues/1).
 Please, submit any issues you find!
+
+
+## Help wanted!
+Though I definitely plan on maintaining this further, over the past few months I've been concentrating on other things and that is not going to change any time soon (until ~October 2023). If you're willing to invest some evenings into hacking around in Neovim, please comment in the [roadmap issue](https://github.com/alfaix/neotest-gtest/issues/1) and I'll try to help getting you started however I can.
 
 ## Features
 Provides support for all features of neotest:
