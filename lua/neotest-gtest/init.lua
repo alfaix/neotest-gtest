@@ -45,7 +45,7 @@ local query = [[
 @test.definition
 ]]
 
-query = vim.treesitter.query.parse_query("cpp", query)
+query = vim.treesitter.query.parse("cpp", query)
 
 local GTestNeotestAdapater = { name = "neotest-gtest" }
 GTestNeotestAdapater.is_test_file = utils.is_test_file
