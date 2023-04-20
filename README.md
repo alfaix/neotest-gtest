@@ -38,6 +38,7 @@ Plug 'alfaix/neotest-gtest'
 ## Usage
 Simply add `neotest-gtest` to the `adapters` field of neotest's config:
 ```lua
+require("neotest-gtest").setup({})
 require("neotest").setup({
   adapters = {
     require("neotest-gtest")
