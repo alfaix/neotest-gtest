@@ -1,0 +1,8 @@
+{
+  "neodev": {
+    "library": {
+      "enabled": "true",
+      "plugins": ["neotest"]
+    }
+  }
+}
