@@ -141,12 +141,12 @@ function M.parse_positions_from_string(file_path, query, content)
   -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
   if injections_text == nil then
     -- TODO can there be more than one?...
-    local injection_file = vim.treesitter.get_query_files('cpp', 'injections')[1]
+    local injection_file = vim.treesitter.query.get_files('cpp', 'injections')[1]
     injections_text = files.read(injection_file)
   end
-  vim.treesitter.set_query('cpp', 'injections', '')
+  vim.treesitter.query.set('cpp', 'injections', '')
   local root = parser:parse()[1]:root()
-  vim.treesitter.set_query('cpp', 'injections', injections_text)
+  vim.treesitter.query.set('cpp', 'injections', injections_text)
   local tests_tree = collect_tests(file_path, query, content, root)
   local tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
