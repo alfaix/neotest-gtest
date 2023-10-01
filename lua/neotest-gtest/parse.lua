@@ -1,7 +1,7 @@
 local M = {}
 -- modeled after (copypasted with minimal changes from) neotest/lib/treesitter/init.lua
 
-local async = require("neotest.async")
+local nio = require("nio")
 local files = require("neotest.lib").files
 local types = require("neotest.types")
 
@@ -135,7 +135,7 @@ end
 function M.parse_positions_from_string(file_path, query, content)
   local ft = files.detect_filetype(file_path)
   local lang = require("nvim-treesitter.parsers").ft_to_lang(ft)
-  async.util.scheduler()
+  nio.scheduler()
   local parser = vim.treesitter.get_string_parser(content, lang, nil)
   -- Workaround for https://github.com/neovim/neovim/issues/21275
   -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
@@ -155,7 +155,7 @@ function M.parse_positions_from_string(file_path, query, content)
 end
 
 function M.parse_positions(file_path, query)
-  async.util.sleep(10)
+  nio.sleep(10)
   local content = files.read(file_path)
   return M.parse_positions_from_string(file_path, query, content)
 end
