@@ -11,6 +11,7 @@ local parse = require("neotest-gtest.parse")
 local Report = require("neotest-gtest.report")
 local Cache = require("neotest-gtest.cache")
 local runners = require("neotest-gtest.runner")
+local dap = require("neotest-gtest.dap")
 
 -- treesitter matches TEST macros as function definitions
 -- treesitter cannot possibly know about macros defined in other files, so this
@@ -47,9 +48,9 @@ local query = [[
 
 query = vim.treesitter.query.parse("cpp", query)
 
-local GTestNeotestAdapater = { name = "neotest-gtest" }
-GTestNeotestAdapater.is_test_file = utils.is_test_file
-function GTestNeotestAdapater.discover_positions(path)
+local GTestNeotestAdapter = { name = "neotest-gtest" }
+GTestNeotestAdapter.is_test_file = utils.is_test_file
+function GTestNeotestAdapter.discover_positions(path)
   return parse.parse_positions(path, query)
 end
 
@@ -100,7 +101,7 @@ local function position2filter(position)
   end
 end
 
-function GTestNeotestAdapater.update_cache(root, executable, runner)
+function GTestNeotestAdapter.update_cache(root, executable, runner)
   local cache, new = Cache:cache_for(root)
   if new then
     cache:load_runners(cache:list_runners())
@@ -108,10 +109,10 @@ function GTestNeotestAdapater.update_cache(root, executable, runner)
   cache:update(executable, runner)
 end
 
-function GTestNeotestAdapater.build_spec(args)
+function GTestNeotestAdapter.build_spec(args)
   local position = args.tree
   local path = position:data().path
-  local root = GTestNeotestAdapater.root(path)
+  local root = GTestNeotestAdapter.root(path)
   local cache, new = Cache:cache_for(root)
   if new then
     runners.load_runners(cache:list_runners())
@@ -150,7 +151,15 @@ function GTestNeotestAdapater.build_spec(args)
     -- but neotest keeps the colors nice and shiny. Thanks, neotest!
     "--gtest_color=yes",
   })
-  return { command = command, context = { results_path = results_path } }
+  return {
+    command = command,
+    context = { results_path = results_path },
+    strategy = dap.strategy(
+      args.strategy,
+      GTestNeotestAdapter.debug_adapter,
+      command
+    ),
+  }
 end
 
 ---@async
@@ -158,7 +167,7 @@ end
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
 ---@return neotest.Result[]
-function GTestNeotestAdapater.results(spec, result, tree)
+function GTestNeotestAdapter.results(spec, result, tree)
   -- nothing ran
   local success, data = pcall(lib.files.read, spec.context.results_path)
   if not success then
@@ -184,8 +193,9 @@ function GTestNeotestAdapater.results(spec, result, tree)
   return reports
 end
 
-function GTestNeotestAdapater.setup(config)
+function GTestNeotestAdapter.setup(config)
   local default_config = {
+    debug_adapter = "codelldb",
     root = lib.files.match_root_pattern(
       "compile_commands.json",
       "compile_flags.txt",
@@ -197,10 +207,11 @@ function GTestNeotestAdapater.setup(config)
     is_test_file = utils.is_test_file
   }
   config = vim.tbl_deep_extend("keep", config, default_config)
-  GTestNeotestAdapater.root = config.root
-  GTestNeotestAdapater.is_test_file = config.is_test_file
-  return GTestNeotestAdapater
+  GTestNeotestAdapter.debug_adapter = config.debug_adapter
+  GTestNeotestAdapter.root = config.root
+  GTestNeotestAdapter.is_test_file = config.is_test_file
+  return GTestNeotestAdapter
 end
 
 
-return GTestNeotestAdapater
+return GTestNeotestAdapter
