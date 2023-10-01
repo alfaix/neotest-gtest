@@ -3,6 +3,7 @@ local M = {}
 
 M.test_extensions = {
   ["cpp"] = true,
+  ["cppm"] = true,
   ["cc"] = true,
   ["cxx"] = true,
   ["c++"] = true,
