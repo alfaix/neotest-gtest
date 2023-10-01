@@ -1,62 +1,18 @@
--- TODO
--- 1. documentation + tests
--- 2. UI improvements: vim.select UI, allow clearing cache, etc.
--- 3. Detect outdated executable
--- 4. TEST_P
--- 5. Debugging
-
 local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local parse = require("neotest-gtest.parse")
 local Report = require("neotest-gtest.report")
-local Cache = require("neotest-gtest.cache")
-local runners = require("neotest-gtest.runner")
-
--- treesitter matches TEST macros as function definitions
--- treesitter cannot possibly know about macros defined in other files, so this
--- is the best we can do. It works pretty well though.
--- under C standard, they are valid definitions with implicit int return type
--- (and with proper compiler flags the CPP code should also compile which should
---  mean that treesitter should continue to parse these as function definitions)
--- Thus, we match all function definitions that meet ALL of the following criteria:
--- * Named TEST/TEST_F/TEST_P (#any-of)
--- * Do not declare a return type (!type)
--- * Only have two parameters (. anchors)
--- * Both parameters are unnamed (!declarator)
--- * Both parameters' type is a simple type_identifier, i.e., no references
---   or cv-qualifiers or templates (type: (type_identifier))
--- The first parameter is the test suite, the second one is the test case
--- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
-local query = [[
-((function_definition
-	declarator: (
-      function_declarator
-        declarator: (identifier) @test.kind
-      parameters: (
-        parameter_list
-          . (parameter_declaration type: (type_identifier) !declarator) @namespace.name
-          . (parameter_declaration type: (type_identifier) !declarator) @test.name
-          .
-      )
-    )
-    !type
-)
-(#any-of? @test.kind "TEST" "TEST_F" "TEST_P"))
-@test.definition
-]]
-
-query = vim.treesitter.query.parse("cpp", query)
+local executables = require("neotest-gtest.executables")
 
 local GTestNeotestAdapater = { name = "neotest-gtest" }
 GTestNeotestAdapater.is_test_file = utils.is_test_file
-function GTestNeotestAdapater.discover_positions(path)
-  return parse.parse_positions(path, query)
-end
+GTestNeotestAdapater.discover_positions = parse.parse_positions
 
--- @param position neotest.Tree position to create a filter to
--- @returns string
-local function position2filter(position)
-  local data = position:data()
+---@param node neotest.Tree position to create a filter to
+---@return string | string[] filters String or potentially nested list of strings.
+---        flatten to get just a list of strings.
+local function node2filters(node)
+  local data = node:data()
   local type = data.type
   local posid = data.id
   if type == "test" then
@@ -66,91 +22,80 @@ local function position2filter(position)
       error("TEST_P is not yet supported, sorry :(")
     else
       local parts = vim.split(posid, "::", { plain = true })
-      assert(#parts == 3, "bad position")
-      -- local file = parts[1]
+      -- file::namespace::test_name
+      assert(#parts == 3, "bad node")
       local namespace = parts[2]
       local test_name = parts[3]
       return string.format("%s.%s", namespace, test_name)
     end
   elseif type == "namespace" then
-    local parts = vim.split(posid, "::", { plain = true })
-    assert(#parts == 2, "bad position")
     return data.name .. ".*"
-  elseif type == "file" then
-    -- Google Test does not support file filters. We collect all tests in
-    -- the file and run it that way. We can also only run the namespace,
-    -- however, Google Test does not restrict namespaces to be contained in
-    -- a single translation unit, and neither should we.
+  elseif type == "file" or type == "dir" then
     local filters = {}
-    for _, namespace in ipairs(position:children()) do
-      for _, test in ipairs(namespace:children()) do
-        filters[#filters + 1] = position2filter(test)
-      end
+    -- run child namespaces: if a namespaces exist in multiple files, this can
+    -- lead to running tests which should not have been run. IDK who would do
+    -- that though.
+    for _, child in ipairs(node:children()) do
+      filters[#filters + 1] = node2filters(child)
     end
-    return table.concat(filters, ":")
-  elseif type == "dir" then
-    -- TODO figure this out. If all tests are under one runner, no issues
-    -- running this. If under multiple, either need to run multiple commands
-    -- or write a wrapper script (in python, probably).
-    -- If runners for some of them are not known, unclear what to do. Asking
-    -- for every file is probably not a great idea
-    return nil
+    return filters
   else
-    error("unknown position type " .. type)
+    error("unknown node type " .. type)
   end
 end
 
-function GTestNeotestAdapater.update_cache(root, executable, runner)
-  local cache, new = Cache:cache_for(root)
-  if new then
-    cache:load_runners(cache:list_runners())
-  end
-  cache:update(executable, runner)
-end
-
+---@param args neotest.RunArgs
+---@return nil | neotest.RunSpec[]
 function GTestNeotestAdapater.build_spec(args)
-  local position = args.tree
-  local path = position:data().path
-  local root = GTestNeotestAdapater.root(path)
-  local cache, new = Cache:cache_for(root)
-  if new then
-    runners.load_runners(cache:list_runners())
+  --`position` may be a directory, which could correspond to multiple GTest
+  --executables. We therefore first build {executable -> nodes} structure, and
+  --then create a separate spec for each executable
+  local tree = args.tree
+  local path = tree:data().path
+  local root = utils.normalize_path(GTestNeotestAdapater.root(path))
+  local ok, executable_paths, missing = GTestNeotestAdapater.find_executables(args.tree, root)
+  if not ok then
+    vim.notify(
+      string.format(
+        "Some nodes do not have a corresponding GTest executable set. Please "
+          .. "configure them by mraking them and then running :ConfigureGtest "
+          .. "in the summary window. Nodes: %s",
+        vim.tbl_map(function(node)
+          return node:data().id
+        end, missing)
+      ),
+      vim.log.levels.ERROR
+    )
+    return nil
   end
 
-  local filter = position2filter(position)
-  if #filter == 0 then
-    error("Did not run tests: no tests selected to run")
+  local specs = {}
+  local i = 0
+  for executable, node_ids in pairs(executable_paths) do
+    for _, node_id in ipairs(node_ids) do
+      -- assumption: get_key looks for all children
+      local node = tree:get_key(node_id)
+      if node == nil then
+        error(string.format("node_id %s not found", node_id))
+      end
+      local filters = table.concat(vim.tbl_flatten({ node2filters(node) }), ":")
+      local logdir = utils.new_results_dir({ history_size = GTestNeotestAdapater.history_size })
+      local results_path = string.format("%s/test_result_%d.json", logdir, i)
+      local command = vim.tbl_flatten({
+        executable,
+        "--gtest_output=json:" .. results_path,
+        "--gtest_filter=" .. filters,
+        args.extra_args,
+        -- gtest doesn't print colors when being redirected
+        -- but neotest keeps the colors nice and shiny. Thanks, neotest!
+        "--gtest_color=yes",
+      })
+      specs[#specs + 1] = { command = command, context = { results_path = results_path } }
+    end
+    i = i + 1
   end
 
-  local runner, err = runners.ui.runner_for(path)
-  if runner == nil and err == nil then -- requested a new one
-    runner, err = runners.ui.new({ paths = { path } })
-  elseif runner ~= nil then
-    assert(err == nil, err)
-    -- If the runner was chosen interactively, this is needed. Otherwise,
-    -- i.e., if the runner has been selected before, this does nothing
-    -- this never fails
-    runner:add_path(path)
-  elseif runner == nil then
-    error("GTest executable not specified or does not exist")
-  else
-    error("Did not run tests: " .. err)
-  end
-  cache:update(runner:executable(), runner:to_json())
-  cache:flush(false)
-
-  local logdir = cache:new_results_dir()
-  local results_path = logdir .. "/test_result.json"
-  local command = vim.tbl_flatten({
-    runner:executable(),
-    "--gtest_output=json:" .. results_path,
-    "--gtest_filter=" .. filter,
-    args.extra_args,
-    -- gtest doesn't print colors when begin redirected
-    -- but neotest keeps the colors nice and shiny. Thanks, neotest!
-    "--gtest_color=yes",
-  })
-  return { command = command, context = { results_path = results_path } }
+  return specs
 end
 
 ---@async
@@ -178,10 +123,35 @@ function GTestNeotestAdapater.results(spec, result, tree)
   for _, testsuite in ipairs(gtest_output.testsuites) do
     for _, test in ipairs(testsuite.testsuite) do
       local report = Report:new(test, tree)
+      -- TODO generally works, short report of `report` is not really short, not
+      -- sure why. Can't call vim.notify() here because async/scheduling bullshit
       reports[report:position_id()] = report:to_neotest_report(result.output)
     end
   end
   return reports
+end
+
+local function set_summary_autocmd(config)
+  local group = vim.api.nvim_create_augroup("NeotestGtestConfigureMarked", { clear = true })
+  vim.api.nvim_create_autocmd("FileType", {
+    pattern = "neotest-summary",
+    group = group,
+    callback = function(ctx)
+      local buf = ctx.buf
+      vim.api.nvim_buf_create_user_command(buf, "ConfigureGtest", function()
+        executables.configure_executable()
+      end, {})
+      if config.mappings.configure ~= nil then
+        vim.api.nvim_buf_set_keymap(
+          buf,
+          "n",
+          config.mappings.configure_key,
+          "<CMD>ConfigureGtest",
+          { desc = "Select a Google Test executable for marked tests" }
+        )
+      end
+    end,
+  })
 end
 
 function GTestNeotestAdapater.setup(config)
@@ -189,18 +159,32 @@ function GTestNeotestAdapater.setup(config)
     root = lib.files.match_root_pattern(
       "compile_commands.json",
       "compile_flags.txt",
+      "WORKSPACE",
       ".clangd",
       "init.lua",
       "init.vim",
-      "build", ".git"
+      "build",
+      ".git"
     ),
-    is_test_file = utils.is_test_file
+    find_executables = require("neotest-gtest.executables").find_executables,
+    history_size = 3,
+    is_test_file = utils.is_test_file,
+    mappings = { configure = nil },
+    filter_dir = function(name, rel_path, root)
+      return true
+    end,
   }
   config = vim.tbl_deep_extend("keep", config, default_config)
+
   GTestNeotestAdapater.root = config.root
+  GTestNeotestAdapater.filter_dir = config.filter_dir
+  GTestNeotestAdapater.history_size = config.history_size
   GTestNeotestAdapater.is_test_file = config.is_test_file
+  GTestNeotestAdapater.find_executables = config.find_executables
+
+  set_summary_autocmd(config)
+
   return GTestNeotestAdapater
 end
-
 
 return GTestNeotestAdapater

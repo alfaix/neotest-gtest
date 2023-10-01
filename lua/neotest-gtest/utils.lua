@@ -1,5 +1,46 @@
+local scandir = require("plenary.scandir")
 local Path = require("plenary.path")
 local M = {}
+
+local user_name = vim.env.USER
+local IS_WINDOWS = vim.fn.has("win32") == 1
+local stddata = vim.fn.stdpath("data")
+local runs_dir = Path:new(stddata .. "/neotest-gtest/runs")
+local cache_dir = stddata .. "/neotest-gtest"
+M.cache_dir = cache_dir
+
+local permissions_table = {
+  -- user r/w/x
+  tonumber("00400", 8),
+  tonumber("00200", 8),
+  tonumber("00100", 8),
+  -- group r/w/x
+  tonumber("00040", 8),
+  tonumber("00020", 8),
+  tonumber("00010", 8),
+  -- others r/w/x
+  tonumber("00004", 8),
+  tonumber("00002", 8),
+  tonumber("00001", 8),
+}
+
+---Creates a permissions mode number from a string.
+---@param str string in the format "rwxrwxrwx", where any letter can be "-" to indicate no permission. Note that the letters themselves are ignored, only order matters.
+---@return integer the permissions mode number
+function M.permissions(str)
+  assert(#str == #permissions_table, "mode string mut have 9 chars, e.g. rw-rwxrwx")
+  local mode = 0
+  for i = 1, #str do
+    if str:sub(i, i) ~= "-" then
+      mode = bit.bor(mode, permissions_table[i])
+    end
+  end
+  return mode
+end
+
+local cache_mode_dir = M.permissions("rwx------")
+Path:new(cache_dir):mkdir({ exist_ok = true, mode = cache_mode_dir })
+Path:new(runs_dir):mkdir({ exist_ok = true, mode = cache_mode_dir })
 
 M.test_extensions = {
   ["cpp"] = true,
@@ -159,33 +200,49 @@ function M.parse_words(inpt)
   return words, nil
 end
 
-local permissions_table = {
-  -- user r/w/x
-  tonumber("00400", 8),
-  tonumber("00200", 8),
-  tonumber("00100", 8),
-  -- group r/w/x
-  tonumber("00040", 8),
-  tonumber("00020", 8),
-  tonumber("00010", 8),
-  -- others r/w/x
-  tonumber("00004", 8),
-  tonumber("00002", 8),
-  tonumber("00001", 8),
-}
+local function symlink(path, new_path)
+  if not IS_WINDOWS then
+    vim.loop.fs_symlink(path, new_path)
+  end
+  -- otherwise just don't bother: only used for user's convenience
+end
 
----Creates a permissions mode number from a string.
----@param str string in the format "rwxrwxrwx", where any letter can be "-" to indicate no permission. Note that the letters themselves are ignored, only order matters.
----@return integer the permissions mode number
-function M.permissions(str)
-  assert(#str == #permissions_table, "mode string mut have 9 chars, e.g. rw-rwxrwx")
-  local mode = 0
-  for i = 1, #str do
-    if str:sub(i, i) ~= "-" then
-      mode = bit.bor(mode, permissions_table[i])
+function M.new_results_dir(opts)
+  opts = vim.tbl_extend("keep", opts or {}, { history_size = 3 })
+  local parent_path = Path:new(runs_dir, string.format("googletest-of-%s", user_name))
+  parent_path:mkdir({ exist_ok = true })
+
+  local existing_paths = {}
+  for _, dir in ipairs(scandir.scan_dir(parent_path.filename, { depth = 1, only_dirs = true })) do
+    if dir:match("%/neotest%-gtest%-run%-%d+$") then
+      existing_paths[#existing_paths + 1] = dir
     end
   end
-  return mode
+
+  -- sort newest -> oldest, only leave history_size - 1 files left
+  local path2nr = function(p)
+    return tonumber(p:match([[%d+$]]))
+  end
+  table.sort(existing_paths, function(l, r)
+    return path2nr(l) > path2nr(r)
+  end)
+  for i = opts.history_size, #existing_paths do
+    local path = existing_paths[i]
+    -- making sure we don't remove something important
+    assert(path:match("%/googletest%-of.*%/neotest%-gtest%-run%-%d+$"))
+    Path:new(path):rm({ recusrive = true })
+  end
+
+  local new_nr
+  if #existing_paths == 0 then
+    new_nr = 1
+  else
+    new_nr = path2nr(existing_paths[1]) + 1
+  end
+  local new_path = Path:new(parent_path, ("neotest-gtest-run-%d"):format(new_nr))
+  new_path:mkdir({ exist_ok = false })
+  symlink(new_path.filename, Path:new(parent_path, "neotest-gtest-latest").filename)
+  return new_path.filename
 end
 
 return M

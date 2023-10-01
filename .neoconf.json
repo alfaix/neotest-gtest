@@ -2,7 +2,12 @@
   "neodev": {
     "library": {
       "enabled": "true",
-      "plugins": ["neotest"]
+      "plugins": ["neotest", "neotest-gtest", "plenary"],
+    }
+  },
+  "neoconf": {
+    "plugins": {
+      "lua_ls": {"enabled": true}
     }
   }
 }

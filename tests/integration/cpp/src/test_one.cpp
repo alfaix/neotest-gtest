@@ -8,7 +8,7 @@
 
 namespace irrelevant {
 
-void fillthisline() {}
+void fillthisline() {} // so that automatically formatted code isn't ugly
 
 TEST(TestOne, TestFailure) {
   fillthisline();

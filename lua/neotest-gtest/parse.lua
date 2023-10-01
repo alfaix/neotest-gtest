@@ -1,7 +1,7 @@
 local M = {}
 -- modeled after (copypasted with minimal changes from) neotest/lib/treesitter/init.lua
 
-local async = require("neotest.async")
+local nio = require("nio")
 local files = require("neotest.lib").files
 local types = require("neotest.types")
 
@@ -135,18 +135,18 @@ end
 function M.parse_positions_from_string(file_path, query, content)
   local ft = files.detect_filetype(file_path)
   local lang = require("nvim-treesitter.parsers").ft_to_lang(ft)
-  async.util.scheduler()
+  nio.scheduler()
   local parser = vim.treesitter.get_string_parser(content, lang, nil)
   -- Workaround for https://github.com/neovim/neovim/issues/21275
   -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
   if injections_text == nil then
     -- TODO can there be more than one?...
-    local injection_file = vim.treesitter.get_query_files('cpp', 'injections')[1]
+    local injection_file = vim.treesitter.query.get_files("cpp", "injections")[1]
     injections_text = files.read(injection_file)
   end
-  vim.treesitter.set_query('cpp', 'injections', '')
+  vim.treesitter.query.set("cpp", "injections", "")
   local root = parser:parse()[1]:root()
-  vim.treesitter.set_query('cpp', 'injections', injections_text)
+  vim.treesitter.query.set("cpp", "injections", injections_text)
   local tests_tree = collect_tests(file_path, query, content, root)
   local tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
@@ -154,10 +154,47 @@ function M.parse_positions_from_string(file_path, query, content)
   return tree
 end
 
-function M.parse_positions(file_path, query)
-  async.util.sleep(10)
+-- treesitter matches TEST macros as function definitions
+-- treesitter cannot possibly know about macros defined in other files, so this
+-- is the best we can do. It works pretty well though.
+-- under C standard, they are valid definitions with implicit int return type
+-- (and with proper compiler flags the CPP code should also compile which should
+--  mean that treesitter should continue to parse these as function definitions)
+-- Thus, we match all function definitions that meet ALL of the following criteria:
+-- * Named TEST/TEST_F/TEST_P (#any-of)
+-- * Do not declare a return type (!type)
+-- * Only have two parameters (. anchors)
+-- * Both parameters are unnamed (!declarator)
+-- * Both parameters' type is a simple type_identifier, i.e., no references
+--   or cv-qualifiers or templates (type: (type_identifier))
+-- The first parameter is the test suite, the second one is the test case
+-- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
+local parse_query = vim.treesitter.query.parse(
+  "cpp",
+  [[
+  ((function_definition
+    declarator: (
+        function_declarator
+          declarator: (identifier) @test.kind
+        parameters: (
+          parameter_list
+            . (parameter_declaration type: (type_identifier) !declarator) @namespace.name
+            . (parameter_declaration type: (type_identifier) !declarator) @test.name
+            .
+        )
+      )
+      !type
+  )
+  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P"))
+  @test.definition
+]]
+)
+
+function M.parse_positions(file_path)
+  -- throttle: can cause very high CPU load for large projects and freeze
+  nio.sleep(10)
   local content = files.read(file_path)
-  return M.parse_positions_from_string(file_path, query, content)
+  return M.parse_positions_from_string(file_path, parse_query, content)
 end
 
 return M
