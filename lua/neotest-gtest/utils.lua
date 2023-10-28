@@ -44,6 +44,7 @@ Path:new(runs_dir):mkdir({ exist_ok = true, mode = cache_mode_dir })
 
 M.test_extensions = {
   ["cpp"] = true,
+  ["cppm"] = true,
   ["cc"] = true,
   ["cxx"] = true,
   ["c++"] = true,

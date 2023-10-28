@@ -1,59 +1,70 @@
 local assert = require("luassert")
-local async = require("plenary.async")
 local utils = require("neotest-gtest.utils")
-
-local a = async.tests
 
 local Cache = require("neotest-gtest.cache")
 
+---Creates a temporary cache
+---@return neotest-gtest.Cache
+local function make_tmp_cache()
+  local tmppath = assert(vim.fn.tempname())
+  local cache = Cache:new(tmppath)
+  assert.are.equal(tmppath, cache:path())
+  return cache
+end
+
+local function write_and_flush(cache, data)
+  cache:update("key", data)
+  cache:flush(false, true)
+end
+
 describe("cache library", function()
   it("Cache is created and deleted", function()
-    local tmppath = vim.fn.tempname()
-    local cache = Cache:new(tmppath)
-    assert.is_true(utils.fexists(tmppath))
-    assert.are.equal(tmppath, cache:path())
+    local cache = make_tmp_cache()
+    assert.is_true(utils.fexists(cache:path()))
+  end)
+
+  it("Cache is deleted", function()
+    local cache = make_tmp_cache()
     cache:drop()
-    assert.is_false(utils.fexists(tmppath))
+    assert.is_false(utils.fexists(cache:path()))
   end)
 
   it("Cache preserves information", function()
-    local tmppath = vim.fn.tempname()
-    local cache = Cache:new(tmppath)
+    local cache = make_tmp_cache()
     cache:update("key", { value = "foo" })
-    cache:flush()
-    local cache2 = Cache:new(tmppath)
-    assert.are.equal("foo", cache2:list_runners().key.value)
+    cache:flush(false, true)
+    local cache2 = Cache:new(cache:path())
+    assert.are.equal("foo", cache2:data().node2exec.key.value)
   end)
 
-  -- flushes the Cache with dirty and clean data, then compares mtime after each flush
-  it("Cache flushes only when dirty", function()
-    local tmppath = vim.fn.tempname()
-    local cache = Cache:new(tmppath)
+  it("Cache flushes when dirty", function()
+    local cache = make_tmp_cache()
 
-    cache:update("key", { value = "foo" })
-    assert.is_true(cache:is_dirty())
-    cache:flush(false, true)
-    local mtime1 = utils.getmtime(tmppath)
+    write_and_flush(cache, { value = "foo" })
+    local mtime1 = utils.getmtime(cache:path())
     vim.wait(10)
 
-    cache:update("key", { value = "bar" })
-    assert.is_true(cache:is_dirty())
-    cache:flush(false, true)
-    local mtime2 = utils.getmtime(tmppath)
-    vim.wait(10)
-
-    cache:update("key", { value = "bar" })
-    assert.is_false(cache:is_dirty())
-    cache:flush(false, true)
-    local mtime3 = utils.getmtime(tmppath)
+    write_and_flush(cache, { value = "bar" })
+    local mtime2 = utils.getmtime(cache:path())
 
     assert.is_true(utils.mtime_lt(mtime1, mtime2))
-    assert.is_true(utils.mtime_eq(mtime2, mtime3))
   end)
 
-  it("cache_for does not create redundant caches", function()
+  it("Cache does not flush when not dirty", function()
+    local cache = make_tmp_cache()
+
+    write_and_flush(cache, { value = "bar" })
+    local mtime1 = utils.getmtime(cache:path())
+    vim.wait(10)
+
+    write_and_flush(cache, { value = "bar" })
+    local mtime2 = utils.getmtime(cache:path())
+
+    assert.is_true(utils.mtime_eq(mtime1, mtime2))
+  end)
+
+  it("cache_for normalizes the path", function()
     local cache, new = Cache:cache_for("/tmppath")
-    -- NB: path is normalized
     local cache2, new2 = Cache:cache_for("/tmppath/")
     assert.is_true(new)
     assert.is_false(new2)
@@ -63,9 +74,9 @@ describe("cache library", function()
   end)
 
   it("different caches do not conflict with each other", function()
-    local cache, _ = Cache:cache_for("/tmppath")
-    -- NB: path is normalized
-    local cache2, _ = Cache:cache_for("/tmppath2")
+    local cache, _ = Cache:cache_for("/tmppath3")
+    local cache2, _ = Cache:cache_for("/tmppath4")
+
     cache:update("key", { value = 1 })
     cache:flush()
     cache2:update("key", { value = 2 })
@@ -73,8 +84,8 @@ describe("cache library", function()
 
     local cachecopy = Cache:new(cache:path())
     local cachecopy2 = Cache:new(cache2:path())
-    assert.is_true(cachecopy:list_runners().key.value == 1)
-    assert.is_true(cachecopy2:list_runners().key.value == 2)
+    assert.are.same({ value = 1 }, cachecopy:data().node2exec.key)
+    assert.are.same({ value = 2 }, cachecopy2:data().node2exec.key)
 
     cache:drop()
     cache2:drop()

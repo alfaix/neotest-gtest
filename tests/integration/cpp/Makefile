@@ -5,6 +5,7 @@ pwd := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 
 build: gtest test_one.cpp test_two.cpp
 	c++ -Og build/test_one.cpp.o build/test_two.cpp.o \
+		-g \
 		-L${pwd}/googletest/build/lib \
 		-lgtest_main \
 		-lgtest \
@@ -18,8 +19,8 @@ gtest: googletest
 
 test_one.cpp:
 	mkdir -p build/ && c++ -Og -I${pwd}/src/ -isystem ${pwd}/googletest/googletest/include -o ${pwd}/build/test_one.cpp.o \
-		-c ${pwd}/src/test_one.cpp
+		-g -c ${pwd}/src/test_one.cpp
 
 test_two.cpp:
 	mkdir -p build/ && c++ -Og -I${pwd}/src/ -isystem ${pwd}/googletest/googletest/include -o ${pwd}/build/test_two.cpp.o \
-		-c ${pwd}/src/test_two.cpp
+		-g -c ${pwd}/src/test_two.cpp

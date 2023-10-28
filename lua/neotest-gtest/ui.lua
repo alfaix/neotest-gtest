@@ -1,7 +1,6 @@
-local async = require("plenary.async")
-local M = {}
+local nio = require("nio")
 
-local input = async.wrap(vim.ui.input, 2)
+local M = {}
 
 --- Removes spaces from the start and the end of `str`
 local function trim(str)
@@ -85,7 +84,7 @@ end
 ---@return string|nil Error if any (currently always nil)
 function M.input(opts)
   opts = vim.tbl_extend("keep", opts or {}, { prompt = "Input: ", default = nil, completion = nil })
-  local inpt = input({
+  local inpt = nio.ui.input({
     prompt = opts.prompt,
     default = opts.default,
     completion = opts.completion,

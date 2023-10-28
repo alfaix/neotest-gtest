@@ -21,6 +21,9 @@ local function read_sync(file_path)
   return data
 end
 
+---Creates a new cache
+---@param path string Directory for which the cache shall maintain executables.
+---@return neotest-gtest.Cache
 function Cache:cache_for(path)
   local encoded_path = utils.encode_path(path)
   if _loaded_caches[encoded_path] == nil then
@@ -31,6 +34,9 @@ function Cache:cache_for(path)
   return _loaded_caches[encoded_path], false
 end
 
+---Creates a new cache
+---@param path string Path at which the cache data will be stored
+---@return neotest-gtest.Cache
 function Cache:new(path)
   local obj = { _path = path, _data = { node2exec = vim.empty_dict() }, _dirty = false }
   setmetatable(obj, { __index = Cache })

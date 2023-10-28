@@ -4,9 +4,10 @@ local parse = require("neotest-gtest.parse")
 local Report = require("neotest-gtest.report")
 local executables = require("neotest-gtest.executables")
 
-local GTestNeotestAdapater = { name = "neotest-gtest" }
-GTestNeotestAdapater.is_test_file = utils.is_test_file
-GTestNeotestAdapater.discover_positions = parse.parse_positions
+local GTestNeotestAdapter = { name = "neotest-gtest" }
+GTestNeotestAdapter.is_test_file = utils.is_test_file
+GTestNeotestAdapter.discover_positions = parse.parse_positions
+local dap = require("neotest-gtest.dap")
 
 ---@param node neotest.Tree position to create a filter to
 ---@return string | string[] filters String or potentially nested list of strings.
@@ -46,14 +47,14 @@ end
 
 ---@param args neotest.RunArgs
 ---@return nil | neotest.RunSpec[]
-function GTestNeotestAdapater.build_spec(args)
+function GTestNeotestAdapter.build_spec(args)
   --`position` may be a directory, which could correspond to multiple GTest
   --executables. We therefore first build {executable -> nodes} structure, and
   --then create a separate spec for each executable
   local tree = args.tree
   local path = tree:data().path
-  local root = utils.normalize_path(GTestNeotestAdapater.root(path))
-  local ok, executable_paths, missing = GTestNeotestAdapater.find_executables(args.tree, root)
+  local root = utils.normalize_path(GTestNeotestAdapter.root(path))
+  local ok, executable_paths, missing = GTestNeotestAdapter.find_executables(args.tree, root)
   if not ok then
     vim.notify(
       string.format(
@@ -79,7 +80,7 @@ function GTestNeotestAdapater.build_spec(args)
         error(string.format("node_id %s not found", node_id))
       end
       local filters = table.concat(vim.tbl_flatten({ node2filters(node) }), ":")
-      local logdir = utils.new_results_dir({ history_size = GTestNeotestAdapater.history_size })
+      local logdir = utils.new_results_dir({ history_size = GTestNeotestAdapter.history_size })
       local results_path = string.format("%s/test_result_%d.json", logdir, i)
       local command = vim.tbl_flatten({
         executable,
@@ -103,7 +104,7 @@ end
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
 ---@return neotest.Result[]
-function GTestNeotestAdapater.results(spec, result, tree)
+function GTestNeotestAdapter.results(spec, result, tree)
   -- nothing ran
   local success, data = pcall(lib.files.read, spec.context.results_path)
   if not success then
@@ -154,8 +155,9 @@ local function set_summary_autocmd(config)
   })
 end
 
-function GTestNeotestAdapater.setup(config)
+function GTestNeotestAdapter.setup(config)
   local default_config = {
+    debug_adapter = "codelldb",
     root = lib.files.match_root_pattern(
       "compile_commands.json",
       "compile_flags.txt",
@@ -176,15 +178,16 @@ function GTestNeotestAdapater.setup(config)
   }
   config = vim.tbl_deep_extend("keep", config, default_config)
 
-  GTestNeotestAdapater.root = config.root
-  GTestNeotestAdapater.filter_dir = config.filter_dir
-  GTestNeotestAdapater.history_size = config.history_size
-  GTestNeotestAdapater.is_test_file = config.is_test_file
-  GTestNeotestAdapater.find_executables = config.find_executables
+  GTestNeotestAdapter.root = config.root
+  GTestNeotestAdapter.filter_dir = config.filter_dir
+  GTestNeotestAdapter.history_size = config.history_size
+  GTestNeotestAdapter.is_test_file = config.is_test_file
+  GTestNeotestAdapter.find_executables = config.find_executables
+  GTestNeotestAdapter.debug_adapter = config.debug_adapter
 
-  set_summary_autocmd(config)
+  -- set_summary_autocmd(config)
 
-  return GTestNeotestAdapater
+  return GTestNeotestAdapter
 end
 
-return GTestNeotestAdapater
+return GTestNeotestAdapter
