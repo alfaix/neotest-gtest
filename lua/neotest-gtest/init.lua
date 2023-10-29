@@ -2,7 +2,7 @@ local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local parse = require("neotest-gtest.parse")
 local Report = require("neotest-gtest.report")
-local executables = require("neotest-gtest.executables")
+local marks = require("neotest-gtest.marks")
 
 local GTestNeotestAdapter = { name = "neotest-gtest" }
 GTestNeotestAdapter.is_test_file = utils.is_test_file
@@ -19,7 +19,8 @@ local function node2filters(node)
   if type == "test" then
     local test_kind = data.extra.kind
     if test_kind == "TEST_P" then
-      -- TODO!!!
+      -- TODO: figure this out (will have to query executables and do
+      -- best-effort matching, probably)
       error("TEST_P is not yet supported, sorry :(")
     else
       local parts = vim.split(posid, "::", { plain = true })
@@ -54,7 +55,8 @@ function GTestNeotestAdapter.build_spec(args)
   local tree = args.tree
   local path = tree:data().path
   local root = utils.normalize_path(GTestNeotestAdapter.root(path))
-  local ok, executable_paths, missing = GTestNeotestAdapter.find_executables(args.tree, root)
+  -- FIXME
+  local ok, executable_paths, missing = executables.find_executables(args.tree, root)
   if not ok then
     vim.notify(
       string.format(
@@ -71,7 +73,6 @@ function GTestNeotestAdapter.build_spec(args)
   end
 
   local specs = {}
-  local i = 0
   for executable, node_ids in pairs(executable_paths) do
     for _, node_id in ipairs(node_ids) do
       -- assumption: get_key looks for all children
@@ -81,21 +82,26 @@ function GTestNeotestAdapter.build_spec(args)
       end
       local filters = table.concat(vim.tbl_flatten({ node2filters(node) }), ":")
       local logdir = utils.new_results_dir({ history_size = GTestNeotestAdapter.history_size })
-      local results_path = string.format("%s/test_result_%d.json", logdir, i)
+      local results_path = string.format("%s/test_result_%d.json", logdir, #specs)
       local command = vim.tbl_flatten({
         executable,
         "--gtest_output=json:" .. results_path,
         "--gtest_filter=" .. filters,
         args.extra_args,
-        -- gtest doesn't print colors when being redirected
+        -- By default, gtest doesn't print colors when being redirected to a file
         -- but neotest keeps the colors nice and shiny. Thanks, neotest!
         "--gtest_color=yes",
       })
-      specs[#specs + 1] = { command = command, context = { results_path = results_path } }
+      specs[#specs + 1] = {
+        command = command,
+        context = { results_path = results_path },
+        strategy = dap.strategy(args.strategy, GTestNeotestAdapter.debug_adapter, command),
+      }
     end
-    i = i + 1
   end
-
+  -- FIXME:
+  -- Incorrect specs: one spec per each test (at least with debug) even if exe
+  -- is the same
   return specs
 end
 
@@ -132,62 +138,8 @@ function GTestNeotestAdapter.results(spec, result, tree)
   return reports
 end
 
-local function set_summary_autocmd(config)
-  local group = vim.api.nvim_create_augroup("NeotestGtestConfigureMarked", { clear = true })
-  vim.api.nvim_create_autocmd("FileType", {
-    pattern = "neotest-summary",
-    group = group,
-    callback = function(ctx)
-      local buf = ctx.buf
-      vim.api.nvim_buf_create_user_command(buf, "ConfigureGtest", function()
-        executables.configure_executable()
-      end, {})
-      if config.mappings.configure ~= nil then
-        vim.api.nvim_buf_set_keymap(
-          buf,
-          "n",
-          config.mappings.configure_key,
-          "<CMD>ConfigureGtest",
-          { desc = "Select a Google Test executable for marked tests" }
-        )
-      end
-    end,
-  })
-end
-
 function GTestNeotestAdapter.setup(config)
-  local default_config = {
-    debug_adapter = "codelldb",
-    root = lib.files.match_root_pattern(
-      "compile_commands.json",
-      "compile_flags.txt",
-      "WORKSPACE",
-      ".clangd",
-      "init.lua",
-      "init.vim",
-      "build",
-      ".git"
-    ),
-    find_executables = require("neotest-gtest.executables").find_executables,
-    history_size = 3,
-    is_test_file = utils.is_test_file,
-    mappings = { configure = nil },
-    filter_dir = function(name, rel_path, root)
-      return true
-    end,
-  }
-  config = vim.tbl_deep_extend("keep", config, default_config)
-
-  GTestNeotestAdapter.root = config.root
-  GTestNeotestAdapter.filter_dir = config.filter_dir
-  GTestNeotestAdapter.history_size = config.history_size
-  GTestNeotestAdapter.is_test_file = config.is_test_file
-  GTestNeotestAdapter.find_executables = config.find_executables
-  GTestNeotestAdapter.debug_adapter = config.debug_adapter
-
-  -- set_summary_autocmd(config)
-
-  return GTestNeotestAdapter
+  require("neotest-gtest.config").setup(config)
 end
 
 return GTestNeotestAdapter

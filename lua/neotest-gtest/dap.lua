@@ -2,12 +2,12 @@ local M = {}
 
 ---@param strategy string
 ---@param adapter string
----@param command string
+---@param command string[]
 function M.strategy(strategy, adapter, command)
   local config = {
     dap = function()
       return {
-        name = "Debug GTest",
+        name = "Debug with neotest-gtest",
         type = adapter,
         request = "launch",
         program = command[1],

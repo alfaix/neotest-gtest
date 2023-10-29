@@ -1,8 +1,9 @@
 {
   "neodev": {
     "library": {
-      "enabled": "true",
-      "plugins": ["neotest", "neotest-gtest", "plenary", "luassert"],
+      "enabled": true,
+      "plugins": ["neotest", "plenary.nvim"],
+      "types": true,
     }
   },
   "neoconf": {
