@@ -67,26 +67,29 @@ local function assert_namespace_meets_spec(namespace, spec)
   end
 end
 
-local function maketempdir()
-  local dirpath = assert(vim.fn.tempname())
-  require("plenary.path"):new(dirpath):mkdir()
-  return dirpath
+local _neotest_state = {
+  adapter2tree = {},
+}
+function _neotest_state.positions(_adapter_id)
+  local tree = _neotest_state.adapter2tree[_adapter_id]
+  if tree == nil then
+    error(vim.inspect({ _neotest_state.adapter2tree, _adapter_id }))
+  end
+  assert.is_not_nil(tree)
+  return tree
+end
+
+function _neotest_state.adapter_ids()
+  return vim.tbl_keys(_neotest_state.adapter2tree)
 end
 
 local function mock_neotest_state(tree)
   -- TODO: proper mocks?
   local neotest = require("neotest")
-
   local adapter_id = "neotest-gtest:" .. tree:data().path
-  neotest.state = {
-    positions = function(_adapter_id)
-      assert.are.equal(_adapter_id, adapter_id)
-      return tree
-    end,
-    adapter_ids = function()
-      return { adapter_id }
-    end,
-  }
+  _neotest_state.adapter2tree[adapter_id] = tree
+
+  neotest.state = _neotest_state
 end
 
 ---Ensures that `spec` is represented by the `tree`
@@ -118,8 +121,9 @@ end
 
 function M.make_directory_tree(fname2content, dirpath)
   if dirpath == nil then
-    dirpath = maketempdir()
+    dirpath = vim.fn.tempname()
   end
+  require("plenary.path"):new(dirpath):mkdir()
 
   local root_data = {
     id = dirpath,

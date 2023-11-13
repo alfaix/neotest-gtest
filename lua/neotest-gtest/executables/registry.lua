@@ -36,6 +36,7 @@ end
 ---@field _root_dir string
 ---@field _storage neotest-gtest.Storage
 ---@field _node2executable table<string, string>
+---@field _tree neotest.Tree
 local ExecutablesRegistry = {}
 
 ---@return neotest-gtest.ExecutablesRegistry
@@ -45,10 +46,16 @@ function ExecutablesRegistry:new(normalized_root_dir)
     _root_dir = normalized_root_dir,
     _storage = storage,
     _node2executable = storage:data(),
+    _tree = nil,
   }
 
   setmetatable(registry, { __index = self })
   return registry
+end
+
+function ExecutablesRegistry:_reload_tree()
+  local adapter_id = ADAPTER_PREFIX .. self._root_dir
+  self._tree = assert(neotest.state.positions(adapter_id))
 end
 
 ---@return string[]
@@ -60,6 +67,7 @@ end
 
 ---@param tree neotest.Tree
 function ExecutablesRegistry:find_executables(id)
+  self:_reload_tree()
   self:_ensure_node_within_root(id)
   local exe = self._node2executable[id] or self:_lookup_parent_executable(id)
   if exe ~= nil then
@@ -82,16 +90,11 @@ function ExecutablesRegistry:_group_children_by_executable(id)
   local children_exe2nodes = {}
 
   for child_id in self:_iter_children(id) do
-    if self._node2executable[child_id] ~= nil then
-      children_exe2nodes[#children_exe2nodes + 1] =
-        { [self._node2executable[child_id]] = { child_id } }
-    else
-      local child_exe2nodes, missing = self:_group_children_by_executable(child_id)
-      if child_exe2nodes == nil then
-        return nil, missing
-      end
-      children_exe2nodes[#children_exe2nodes + 1] = child_exe2nodes
+    local child_exe2nodes, missing = self:_group_tree_by_executable(child_id)
+    if child_exe2nodes == nil then
+      return nil, missing
     end
+    children_exe2nodes[#children_exe2nodes + 1] = child_exe2nodes
   end
 
   if #children_exe2nodes == 0 then
@@ -102,11 +105,20 @@ function ExecutablesRegistry:_group_children_by_executable(id)
   return _merge_node_by_executable_groups(children_exe2nodes)
 end
 
+function ExecutablesRegistry:_group_tree_by_executable(id)
+  if self._node2executable[id] ~= nil then
+    return { [self._node2executable[id]] = { id } }, nil
+  else
+    return self:_group_children_by_executable(id)
+  end
+end
+
 ---Sets executable for node identified by `node_id`
 ---@param node_id string
 ---@param executable string|nil
 function ExecutablesRegistry:update_executable(node_id, executable)
   self:_ensure_node_within_root(node_id)
+  self:_reload_tree()
   self._node2executable[node_id] = executable
   self:_restore_invariant(node_id)
   self._storage:flush()
@@ -114,9 +126,7 @@ end
 
 function ExecutablesRegistry:_iter_children(node_id)
   -- TODO: keep a root tree cached
-  local adapter_id = ADAPTER_PREFIX .. self._root_dir
-  local root_tree = assert(neotest.state.positions(adapter_id))
-  local node = assert(root_tree:get_key(node_id))
+  local node = assert(self._tree:get_key(node_id))
   local children = node:children()
 
   return utils.map_list(function(child)

@@ -38,7 +38,6 @@ end
 local function make_registry()
   registry_dir = assert(vim.fn.tempname())
   registry_dir = utils.normalize_path(registry_dir)
-  require("plenary.path"):new(registry_dir):mkdir()
 
   registry = ExecutablesRegistry:new(registry_dir)
 end
@@ -183,31 +182,38 @@ describe("with three files in the tree", function()
 end)
 
 describe("test global registry", function()
+  local dir1, dir2, reg1, reg2
+
+  local function setup()
+    dir1 = assert(vim.fn.tempname())
+    dir2 = assert(vim.fn.tempname())
+    tree_utils.make_directory_tree({ ["test_one.cpp"] = "TEST(F, G) {}" }, dir1)
+    tree_utils.make_directory_tree({ ["test_one.cpp"] = "TEST(F, G) {}" }, dir2)
+    reg1 = GlobalRegistry:for_dir(dir1)
+    reg2 = GlobalRegistry:for_dir(dir2)
+  end
+
   it("returns the same registry for the same root", function()
-    local registry1 = GlobalRegistry:for_dir("/foo")
-    local registry2 = GlobalRegistry:for_dir("/foo")
-    assert.are.equal(registry1, registry2)
+    setup()
+    local reg3 = GlobalRegistry:for_dir(dir1)
+    assert.are.equal(reg1, reg3)
   end)
 
   it("lists executables from all registrys", function()
-    local registry1 = GlobalRegistry:for_dir("/foo")
-    local registry2 = GlobalRegistry:for_dir("/bar")
-    registry1:update_executable("/foo/test.cpp", "/bin/exe1")
-    registry2:update_executable("/bar/test.cpp", "/bin/exe2")
+    setup()
+    reg1:update_executable(dir1 .. "/test.cpp", "/bin/exe1")
+    reg2:update_executable(dir2 .. "/test.cpp", "/bin/exe2")
 
     local exes = GlobalRegistry:list_executables({ "/foo", "/bar" })
     table.sort(exes)
 
     assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
   end)
-end)
 
-describe("test executables api", function()
   it("list_executables lists executables from all roots", function()
-    local registry1 = GlobalRegistry:for_dir("/foo")
-    local registry2 = GlobalRegistry:for_dir("/bar")
-    registry1:update_executable("/foo/test.cpp", "/bin/exe1")
-    registry2:update_executable("/bar/test.cpp", "/bin/exe2")
+    setup()
+    reg1:update_executable(dir1 .. "/test.cpp", "/bin/exe1")
+    reg2:update_executable(dir2 .. "/test.cpp", "/bin/exe2")
     local exes = executables_module.list_executables({ "/foo", "/bar" })
     table.sort(exes)
     assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
