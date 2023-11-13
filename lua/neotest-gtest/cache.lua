@@ -38,7 +38,7 @@ end
 ---@param path string Path at which the cache data will be stored
 ---@return neotest-gtest.Cache
 function Cache:new(path)
-  local obj = { _path = path, _data = { node2exec = vim.empty_dict() }, _dirty = false }
+  local obj = { _path = path, _data = vim.empty_dict() }
   setmetatable(obj, { __index = Cache })
 
   local exists, _ = utils.fexists(path)
@@ -46,9 +46,10 @@ function Cache:new(path)
     obj:flush(true) -- create the file
   else
     local json = read_sync(path)
-    obj._data = json == "" and {} or vim.json.decode(json)
-    if obj._data.node2exec == nil then
-      obj._data.node2exec = vim.empty_dict()
+    obj._data = json == "" and vim.empty_dict() or vim.json.decode(json)
+    if obj._data.node2exec ~= nil then
+      -- previously data was stored in node2exec, this is for compatibility
+      obj._data = obj._data.node2exec
     end
   end
 
@@ -81,28 +82,13 @@ function Cache:data()
   return self._data
 end
 
-function Cache:update(key, value)
-  local old_data = self._data.node2exec[key]
-  if not json_eq(old_data, value) then
-    self._data.node2exec[key] = value
-    self._dirty = true
-  end
-end
-
 function Cache:path()
   return self._path
 end
 
-function Cache:is_dirty()
-  return self._dirty
-end
-
 ---Flushes the cache to disk.
----@param force boolean if true, forces the cache to be flushed even if it's not dirty
-function Cache:flush(force, sync)
-  if not self._dirty and not force then
-    return
-  end
+---@param sync boolean|nil
+function Cache:flush(sync)
   local as_json = vim.json.encode(self._data)
   if as_json == nil then
     return
@@ -114,7 +100,6 @@ function Cache:flush(force, sync)
     assert(vim.loop.fs_fsync(file_fd))
   end
   assert(vim.loop.fs_close(file_fd))
-  self._dirty = false
 end
 
 function Cache:drop()

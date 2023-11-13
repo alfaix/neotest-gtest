@@ -246,4 +246,32 @@ function M.new_results_dir(opts)
   return new_path.filename
 end
 
+function M.list_to_set(list)
+  local set = {}
+  for i = 1, #list do
+    set[list[i]] = true
+  end
+  return set
+end
+
+function M.map_list(map_fn, table)
+  local i = 0
+  return function()
+    i = i + 1
+    if i <= #table then
+      return map_fn(table[i])
+    end
+  end,
+    nil,
+    nil
+end
+
+function M.collect_iterable(...)
+  local list = {}
+  for v in ... do
+    table.insert(list, v)
+  end
+  return list
+end
+
 return M

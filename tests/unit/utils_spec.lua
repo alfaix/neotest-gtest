@@ -79,4 +79,42 @@ describe("helper functions", function()
     assert.is_true(utils.mtime_eq(mtime1, mtime1))
     assert.is_true(utils.mtime_eq(mtime2, mtime2))
   end)
+
+  it("list_to_set converts list correctly", function()
+    local list = { "foo", "bar", "baz" }
+    local set = utils.list_to_set(list)
+    assert.are.same(set, { foo = true, bar = true, baz = true })
+  end)
+
+  it("list_to_set converts empty list", function()
+    local list = {}
+    local set = utils.list_to_set(list)
+    assert.are.same(set, {})
+  end)
+
+  it("collect_iterable collects empty iterable", function()
+    local t = {}
+    assert.are.same(utils.collect_iterable(pairs(t)), t)
+  end)
+
+  it("collect_iterable collects non-empty iterable", function()
+    local t = { 1, 2, 3, 4 }
+    assert.are.same(utils.collect_iterable(pairs(t)), t)
+  end)
+
+  it("map_list returns empty iterable for empty table", function()
+    local list = {}
+    local mapped = utils.collect_iterable(utils.map_list(function(x)
+      return x
+    end, list))
+    assert.are.same({}, mapped)
+  end)
+
+  it("map_list maps a list correctly", function()
+    local list = { 1, 2, 3 }
+    local mapped = utils.collect_iterable(utils.map_list(function(x)
+      return x + 1
+    end, list))
+    assert.are.same({ 2, 3, 4 }, mapped)
+  end)
 end)

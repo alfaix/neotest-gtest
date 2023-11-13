@@ -1,12 +1,9 @@
 local utils = require("neotest-gtest.utils")
-local Cache = require("neotest-gtest.cache")
 
 local M = {}
 
 local _root2state = {}
 
----Returns the state of the executables mapping for the given directory,
----fetching it from disk if necessary.
 ---@param root string Directory for which to fetch the cache.
 ---@return neotest-gtest.Cache # Cache for the root directory.
 local function get_cache(root)
@@ -36,12 +33,12 @@ end
 
 ---Set `path` as the executable path for all given `positions`. Flushes the data
 ---to disk, if necessary.
----@param positions string[] List of position ids to set the executable path for.
 ---@param path nil | string Set all positions to the given path. If nil, will
 ---remove the mappings for the given position. This is necessary functionality
 ---because if a root directory is mapped to something, then its children cannot
 ---be assigned anything.
-local function set_all(positions, path)
+---@param positions string[] List of position ids to set the executable path for.
+local function set_executable_for_positions(path, positions)
   ---@type table<string, neotest-gtest.Cache>
   local caches = {}
 
@@ -95,26 +92,28 @@ local function find_executables_recurse(node, state, result, lookup_parents)
   end
 
   local node_type = node:data().type
-  local not_found = {}
-  if node_type ~= "test" then
-    local all_ok = true
-    for _, child in ipairs(node:children()) do
-      local ok, missing = find_executables_recurse(child, state, result, false)
-      if not ok then
-        assert(missing, "not ok but nothing missing")
-        not_found[#not_found + 1] = missing
-      end
-    end
-    return all_ok, not_found
+  if node_type == "test" then
+    return false, node
   end
 
-  return false, node
+  local all_ok = true
+  local not_found = {}
+  for _, child in ipairs(node:children()) do
+    local ok, missing = find_executables_recurse(child, state, result, false)
+    if not ok then
+      assert(missing, "not ok but nothing missing")
+      not_found[#not_found + 1] = missing
+    end
+  end
+  return all_ok, not_found
 end
 
----Looks up an executable for node, if one has been set previously.
+local root2registry = {}
+
+---Looks up a list of executables that together can run all tests under `node`.
 ---@param node neotest.Tree Test node to perform the lookup for.
----@return boolean ok Whether executables are found for all tests in `node`.
----@return {[string]: string[]} | nil results executable path -> node_ids[]
+---@return boolean ok Whether executables are found for all tests under `node`.
+---@return {string: string[]} | nil results executable path -> node_ids[]
 ---@return neotest.Tree[] | nil not_found List of nodes for which no executables
 ---        could be found
 function M.find_executables(node, root)
@@ -150,9 +149,23 @@ local function input_executable(positions)
     completion = "file",
   }, function(path)
     if path ~= nil then
-      set_all(positions, path)
+      set_executable_for_positions(path, positions)
     end
   end)
+end
+
+local function get_marked_positions()
+  local summary = require("neotest").summary
+  local positions = {}
+  local prefix = "neotest-gtest:"
+  for adapter, marked in pairs(summary.marked()) do
+    if vim.startswith(adapter, prefix) then
+      for _, position in pairs(marked) do
+        positions[#positions + 1] = position
+      end
+    end
+  end
+  return positions
 end
 
 ---Prompts the user to configure executable for all currently marked nodes.
@@ -160,18 +173,7 @@ end
 ---the mapping for all marked nodes.
 ---@see neotest.consumers.summary.marked
 function M.configure_executable()
-  local summary = require("neotest").summary
-  local positions = {}
-  local roots = {}
-  local prefix = "neotest-gtest:"
-  for adapter, marked in pairs(summary.marked()) do
-    if vim.startswith(adapter, prefix) then
-      for _, position in pairs(marked) do
-        roots[#roots + 1] = position_root(position)
-        positions[#positions + 1] = position
-      end
-    end
-  end
+  local positions = get_marked_positions()
   if #positions == 0 then
     vim.notify(
       "Please mark the tests (or namespaces, files, dirs) first and then call :ConfigureGtest",
@@ -179,6 +181,7 @@ function M.configure_executable()
     )
     return
   end
+  local roots = vim.tbl_map(position_root, positions)
 
   local choices = list_executables(roots)
   choices[#choices + 1] = "Remove bindings for selected nodes"
@@ -187,9 +190,9 @@ function M.configure_executable()
     prompt = "Select path to the executable which will run marked tests:",
   }, function(chosen, idx)
     if idx < #choices - 1 then
-      set_all(positions, chosen)
+      set_executable_for_positions(chosen, positions)
     elseif idx == #choices - 1 then -- choice == Remove bindings
-      set_all(positions, nil)
+      set_executable_for_positions(nil, positions)
     else -- choice == Enter path...
       input_executable(positions)
     end

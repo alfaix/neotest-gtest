@@ -2,14 +2,14 @@ local assert = require("luassert")
 local parse_module = require("neotest-gtest.parse")
 local lib = require("neotest.lib")
 local it = require("nio").tests.it
-local tree_checker = require("tests.unit.tree_checker")
+local tree_utils = require("tests.unit.tree_utils")
 
 local function assert_parses_as(file_content, spec)
   local fpath = assert(vim.fn.tempname()) .. ".cpp"
   lib.files.write(fpath, file_content)
   local tree = parse_module.parse_positions(fpath)
   spec.path = fpath
-  tree_checker.assert_tree_meets_spec(tree, spec)
+  tree_utils.assert_tree_meets_spec(tree, spec)
 end
 
 describe("config library", function()

@@ -32,6 +32,10 @@ function M.setup(config_override)
   setmetatable(M, { __index = config })
 end
 
+function M.get_config()
+  return config
+end
+
 -- for tests
 function M.reset()
   config = default_config
