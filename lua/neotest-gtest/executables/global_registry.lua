@@ -1,7 +1,12 @@
 local utils = require("neotest-gtest.utils")
 local ExecutablesRegistry = require("neotest-gtest.executables.registry")
 
+---@class neotest-gtest.GlobalExecutableRegistry
+---@field _root2registry table<string, neotest-gtest.ExecutablesRegistry>
 local GlobalExecutableRegistry = {}
+
+---@private
+---@return neotest-gtest.GlobalExecutableRegistry
 function GlobalExecutableRegistry:new()
   local registry = {
     _root2registry = {},
@@ -18,6 +23,18 @@ function GlobalExecutableRegistry:for_dir(_root_dir)
     self._root2registry[normalized] = ExecutablesRegistry:new(normalized)
   end
   return self._root2registry[normalized]
+end
+
+function GlobalExecutableRegistry:list_executables(root_dirs)
+  local executables = {}
+  for _, root in ipairs(root_dirs) do
+    local normalized = utils.normalize_path(root)
+    local registry = self:for_dir(normalized)
+    for _, exe in pairs(registry:list_executables()) do
+      executables[exe] = true
+    end
+  end
+  return vim.tbl_keys(executables)
 end
 
 local globalRegistry = GlobalExecutableRegistry:new()

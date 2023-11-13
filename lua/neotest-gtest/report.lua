@@ -89,8 +89,6 @@ function Report:_error_info(error)
       header = string.format("Assertion failure at line %d:", linenum)
       -- Do not show diagnostics outside of test: multiple tests can show
       -- the same line, which will likely lead to confusion
-      -- TODO: Investigate alternatives, such as showing all errors with
-      -- test names
       if not range_contains(test_data.range, linenum) then
         linenum = nil
       end

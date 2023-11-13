@@ -1,9 +1,10 @@
 local utils = require("neotest-gtest.utils")
 local assert = require("luassert")
 local ExecutablesRegistry = require("neotest-gtest.executables.registry")
+local GlobalRegistry = require("neotest-gtest.executables.global_registry")
 local tree_utils = require("tests.unit.tree_utils")
 local it = require("nio.tests").it
-local before_each = require("nio.tests").before_each
+local executables_module = require("neotest-gtest.executables")
 
 ---@type string
 local registry_dir
@@ -188,5 +189,37 @@ describe("with three files in the tree", function()
     registry:update_executable(ids.root, nil)
     local _, missing = registry:find_executables(ids.test_one)
     assert.are.equal(#missing, 1)
+  end)
+end)
+
+describe("test global registry", function()
+  it("returns the same registry for the same root", function()
+    local registry1 = GlobalRegistry:for_dir("/foo")
+    local registry2 = GlobalRegistry:for_dir("/foo")
+    assert.are.equal(registry1, registry2)
+  end)
+
+  it("lists executables from all registrys", function()
+    local registry1 = GlobalRegistry:for_dir("/foo")
+    local registry2 = GlobalRegistry:for_dir("/bar")
+    registry1:update_executable("/foo/test.cpp", "/bin/exe1")
+    registry2:update_executable("/bar/test.cpp", "/bin/exe2")
+
+    local exes = GlobalRegistry:list_executables({ "/foo", "/bar" })
+    table.sort(exes)
+
+    assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
+  end)
+end)
+
+describe("test executables api", function()
+  it("list_executables lists executables from all roots", function()
+    local registry1 = GlobalRegistry:for_dir("/foo")
+    local registry2 = GlobalRegistry:for_dir("/bar")
+    registry1:update_executable("/foo/test.cpp", "/bin/exe1")
+    registry2:update_executable("/bar/test.cpp", "/bin/exe2")
+    local exes = executables_module.list_executables({ "/foo", "/bar" })
+    table.sort(exes)
+    assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
   end)
 end)

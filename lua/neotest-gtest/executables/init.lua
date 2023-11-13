@@ -12,17 +12,11 @@ end
 
 ---Lists all executables that are registered for at least one of node in a tree
 ---under any of `roots`.
-local function list_executables(roots)
+function M.list_executables(roots)
   if type(roots) == "string" then
     roots = { roots }
   end
-  local executables = {}
-  for _, root in ipairs(roots) do
-    for _, executable in pairs(_nodeid2exec(root)) do
-      executables[executable] = true
-    end
-  end
-  return vim.tbl_keys(executables)
+  return GlobalRegistry:list_executables(roots)
 end
 
 ---Prompts the user to enter executable path and sets it for all `positions`.
