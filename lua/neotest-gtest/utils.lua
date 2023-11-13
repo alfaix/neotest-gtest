@@ -6,8 +6,8 @@ local user_name = vim.env.USER
 local IS_WINDOWS = vim.fn.has("win32") == 1
 local stddata = vim.fn.stdpath("data")
 local runs_dir = Path:new(stddata .. "/neotest-gtest/runs")
-local cache_dir = stddata .. "/neotest-gtest"
-M.cache_dir = cache_dir
+local storage_dir = stddata .. "/neotest-gtest"
+M.storage_dir = storage_dir
 
 local permissions_table = {
   -- user r/w/x
@@ -38,9 +38,9 @@ function M.permissions(str)
   return mode
 end
 
-local cache_mode_dir = M.permissions("rwx------")
-Path:new(cache_dir):mkdir({ exist_ok = true, mode = cache_mode_dir })
-Path:new(runs_dir):mkdir({ exist_ok = true, mode = cache_mode_dir })
+local mode = M.permissions("rwx------")
+Path:new(storage_dir):mkdir({ exist_ok = true, mode = mode })
+Path:new(runs_dir):mkdir({ exist_ok = true, mode = mode })
 
 M.test_extensions = {
   ["cpp"] = true,

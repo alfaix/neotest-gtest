@@ -1,13 +1,12 @@
 local utils = require("neotest-gtest.utils")
-local Path = require("plenary.path")
 
-local cache_mode = utils.permissions("rw-------")
+local storage_mode = utils.permissions("rw-------")
 
----@class neotest-gtest.Cache
+---@class neotest-gtest.Storage
 ---@field private _data any
 ---@field private _path string
-local Cache = {}
-local _loaded_caches = {}
+local Storage = {}
+local _loaded_storages = {}
 
 -- I think this might've been true for the old autocmd flush stuff, but no longer true.
 -- TODO: move to async stuff if it can be used
@@ -21,25 +20,26 @@ local function read_sync(file_path)
   return data
 end
 
----Creates a new cache
----@param path string Directory for which the cache shall maintain executables.
----@return neotest-gtest.Cache
-function Cache:cache_for(path)
+---Creates a new storage
+---@param path string Directory for which the storage shall maintain executables.
+---@return neotest-gtest.Storage
+---@return boolean is_new True if the storage was loaded from disk, false if returned from memory.
+function Storage:for_directory(path)
   local encoded_path = utils.encode_path(path)
-  if _loaded_caches[encoded_path] == nil then
-    local full_path = string.format("%s/%s.json", utils.cache_dir, encoded_path)
-    _loaded_caches[encoded_path] = Cache:new(full_path)
-    return _loaded_caches[encoded_path], true
+  if _loaded_storages[encoded_path] == nil then
+    local full_path = string.format("%s/%s.json", utils.storage_dir, encoded_path)
+    _loaded_storages[encoded_path] = Storage:new(full_path)
+    return _loaded_storages[encoded_path], true
   end
-  return _loaded_caches[encoded_path], false
+  return _loaded_storages[encoded_path], false
 end
 
----Creates a new cache
----@param path string Path at which the cache data will be stored
----@return neotest-gtest.Cache
-function Cache:new(path)
+---Creates a new storage
+---@param path string Path at which the storage data will be stored
+---@return neotest-gtest.Storage
+function Storage:new(path)
   local obj = { _path = path, _data = vim.empty_dict() }
-  setmetatable(obj, { __index = Cache })
+  setmetatable(obj, { __index = Storage })
 
   local exists, _ = utils.fexists(path)
   if not exists then
@@ -56,44 +56,22 @@ function Cache:new(path)
   return obj
 end
 
-local function json_eq(lhs, rhs)
-  if type(lhs) ~= type(rhs) then
-    return false
-  end
-
-  if type(lhs) == "table" then
-    local lhs_keys = vim.tbl_keys(lhs)
-    local rhs_keys = vim.tbl_keys(rhs)
-    if #lhs_keys ~= #rhs_keys then
-      return false
-    end
-    for key, value in pairs(lhs) do
-      if not json_eq(value, rhs[key]) then
-        return false
-      end
-    end
-    return true
-  end
-
-  return lhs == rhs
-end
-
-function Cache:data()
+function Storage:data()
   return self._data
 end
 
-function Cache:path()
+function Storage:path()
   return self._path
 end
 
----Flushes the cache to disk.
+---Flushes the in-memory data() to disk.
 ---@param sync boolean|nil
-function Cache:flush(sync)
+function Storage:flush(sync)
   local as_json = vim.json.encode(self._data)
   if as_json == nil then
     return
   end
-  local file_fd = assert(vim.loop.fs_open(self._path, "w", cache_mode))
+  local file_fd = assert(vim.loop.fs_open(self._path, "w", storage_mode))
   local nbytes = assert(vim.loop.fs_write(file_fd, as_json, 0))
   assert(nbytes == #as_json, nbytes)
   if sync then
@@ -102,8 +80,8 @@ function Cache:flush(sync)
   assert(vim.loop.fs_close(file_fd))
 end
 
-function Cache:drop()
+function Storage:drop()
   return vim.loop.fs_unlink(self._path)
 end
 
-return Cache
+return Storage

@@ -1,4 +1,4 @@
-local Cache = require("neotest-gtest.cache")
+local Storage = require("neotest-gtest.storage")
 local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local neotest = require("neotest")
@@ -34,19 +34,17 @@ local function _merge_node_by_executable_groups(groups)
 end
 ---@class neotest-gtest.ExecutablesRegistry
 ---@field _root_dir string
----@field _cache neotest-gtest.Cache
+---@field _storage neotest-gtest.Storage
 ---@field _node2executable table<string, string>
 local ExecutablesRegistry = {}
 
 ---@return neotest-gtest.ExecutablesRegistry
 function ExecutablesRegistry:new(normalized_root_dir)
-  local cache, _ = Cache:cache_for(normalized_root_dir)
+  local storage, _ = Storage:for_directory(normalized_root_dir)
   local registry = {
     _root_dir = normalized_root_dir,
-    _cache = cache,
-    -- HACK: we use cache data directly instead of :update()
-    -- should probably delete update() API and make it non-hack
-    _node2executable = cache:data(),
+    _storage = storage,
+    _node2executable = storage:data(),
   }
 
   setmetatable(registry, { __index = self })
@@ -111,9 +109,7 @@ function ExecutablesRegistry:update_executable(node_id, executable)
   self:_ensure_node_within_root(node_id)
   self._node2executable[node_id] = executable
   self:_restore_invariant(node_id)
-  -- HACK: we don't use API directly so we force the flush as the cache thinks
-  -- it's not dirty
-  self._cache:flush(true)
+  self._storage:flush()
 end
 
 function ExecutablesRegistry:_iter_children(node_id)
