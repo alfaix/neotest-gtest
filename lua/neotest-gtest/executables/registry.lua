@@ -65,7 +65,7 @@ function ExecutablesRegistry:list_executables()
   return vim.tbl_keys(executables_set)
 end
 
----@param tree neotest.Tree
+---@param id string
 function ExecutablesRegistry:find_executables(id)
   self:_reload_tree()
   self:_ensure_node_within_root(id)
