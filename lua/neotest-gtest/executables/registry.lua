@@ -69,7 +69,7 @@ end
 function ExecutablesRegistry:find_executables(id)
   self:_reload_tree()
   self:_ensure_node_within_root(id)
-  local exe = self._node2executable[id] or self:_lookup_parent_executable(id)
+  local exe = self._node2executable[id] or self:_lookup_ancestor_executable(id)
   if exe ~= nil then
     return { [exe] = { id } }, nil
   end
@@ -77,9 +77,9 @@ function ExecutablesRegistry:find_executables(id)
   return self:_group_children_by_executable(id)
 end
 
-function ExecutablesRegistry:_lookup_parent_executable(id)
-  for parent in self:_iter_parents(id) do
-    local exe = self._node2executable[parent]
+function ExecutablesRegistry:_lookup_ancestor_executable(id)
+  for ancestor in self:_iter_ancestors(id) do
+    local exe = self._node2executable[ancestor]
     if exe ~= nil then
       return exe
     end
@@ -134,7 +134,7 @@ function ExecutablesRegistry:_iter_children(node_id)
   end, children)
 end
 
-function ExecutablesRegistry:_iter_parents(node_id)
+function ExecutablesRegistry:_iter_ancestors(node_id)
   return function(_, x)
     return self:_parent_id(x)
   end, nil, node_id
@@ -151,9 +151,9 @@ function ExecutablesRegistry:_restore_invariant(node_id)
   end
 end
 
-function ExecutablesRegistry:_clear_children_executables(parent)
+function ExecutablesRegistry:_clear_children_executables(ancestor)
   for node, _ in pairs(self._node2executable) do
-    if _is_ancestor(parent, node) then
+    if _is_ancestor(ancestor, node) then
       self._node2executable[node] = nil
     end
   end
@@ -161,38 +161,38 @@ end
 
 function ExecutablesRegistry:_sift_down_executable(node_id)
   local my_executable = self._node2executable[node_id]
-  local configured_parent, parent_executable = self:_find_parent_with_executable(node_id)
+  local configured_ancestor, parent_executable = self:_find_ancestor_with_executable(node_id)
 
   if parent_executable == my_executable then
     self._node2executable[node_id] = nil -- avoid duplicates, prefer parent configuration
   elseif parent_executable ~= nil then
-    self:_sift_down_executable_from_parent(node_id, configured_parent)
+    self:_sift_down_executable_from_parent(node_id, configured_ancestor)
   end
 end
 
-function ExecutablesRegistry:_sift_down_executable_from_parent(node_id, configured_parent)
-  local parent_executable = self._node2executable[configured_parent]
-  local parents = utils.collect_iterable(self:_iter_parents(node_id))
-  local parents_set = utils.list_to_set(parents)
+function ExecutablesRegistry:_sift_down_executable_from_parent(node_id, configured_ancestor)
+  local ancestor_executable = self._node2executable[configured_ancestor]
+  local ancestors = utils.collect_iterable(self:_iter_ancestors(node_id))
+  local ancesotrs_set = utils.list_to_set(ancestors)
 
-  for _, parent in ipairs(parents) do
-    for sibling in self:_iter_children(parent) do
-      if not parents_set[sibling] and sibling ~= node_id then
-        self._node2executable[sibling] = parent_executable
+  for _, ancestor in ipairs(ancestors) do
+    for sibling in self:_iter_children(ancestor) do
+      if not ancesotrs_set[sibling] and sibling ~= node_id then
+        self._node2executable[sibling] = ancestor_executable
       end
     end
 
-    self._node2executable[parent] = nil
-    if parent == configured_parent then
+    self._node2executable[ancestor] = nil
+    if ancestor == configured_ancestor then
       break
     end
   end
 end
 
-function ExecutablesRegistry:_find_parent_with_executable(node_id)
-  for parent in self:_iter_parents(node_id) do
-    if self._node2executable[parent] ~= nil then
-      return parent, self._node2executable[parent]
+function ExecutablesRegistry:_find_ancestor_with_executable(node_id)
+  for ancestor in self:_iter_ancestors(node_id) do
+    if self._node2executable[ancestor] ~= nil then
+      return ancestor, self._node2executable[ancestor]
     end
   end
 end
