@@ -1,6 +1,6 @@
 local config = require("neotest-gtest.config")
 local executables = require("neotest-gtest.executables")
-local neotest_spec_utils = require("tests.unit.neotest_spec_utils")
+local neotest_spec_utils = require("tests.utils.neotest_spec")
 local it = require("nio").tests.it
 
 local MOCK_EXECUTABLE = "/build/some-gtest-executable"

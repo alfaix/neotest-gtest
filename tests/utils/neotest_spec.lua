@@ -1,4 +1,4 @@
-local tree_utils = require("tests.unit.tree_utils")
+local tree_utils = require("tests.utils.tree")
 local NeotestAdapter = require("neotest-gtest.neotest_adapter")
 local assert = require("luassert")
 

@@ -2,7 +2,7 @@ local assert = require("luassert")
 local parse_module = require("neotest-gtest.parse")
 local lib = require("neotest.lib")
 local it = require("nio").tests.it
-local tree_utils = require("tests.unit.tree_utils")
+local tree_utils = require("tests.utils.tree")
 
 local function assert_parses_as(file_content, spec)
   local fpath = assert(vim.fn.tempname()) .. ".cpp"

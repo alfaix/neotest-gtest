@@ -2,7 +2,7 @@ local utils = require("neotest-gtest.utils")
 local assert = require("luassert")
 local ExecutablesRegistry = require("neotest-gtest.executables.registry")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
-local tree_utils = require("tests.unit.tree_utils")
+local tree_utils = require("tests.utils.tree")
 local it = require("nio.tests").it
 local executables_module = require("neotest-gtest.executables")
 
@@ -10,7 +10,6 @@ local executables_module = require("neotest-gtest.executables")
 local registry_dir
 ---@type neotest-gtest.ExecutablesRegistry
 local registry
-local root_tree
 
 local function make_node_id(node_name)
   if node_name == "" then
@@ -20,15 +19,7 @@ local function make_node_id(node_name)
 end
 
 local function with_file_tree(fname2contents)
-  root_tree = tree_utils.make_directory_tree(fname2contents, registry_dir)
-end
-
-local function get_node_by_id_or_root(node_id)
-  if node_id ~= nil then
-    return root_tree:get_key(node_id)
-  else
-    return root_tree
-  end
+  tree_utils.make_directory_tree(fname2contents, registry_dir)
 end
 
 local function assert_executables_for_node(node_id, expected_executables)
@@ -50,7 +41,6 @@ local function make_registry()
   require("plenary.path"):new(registry_dir):mkdir()
 
   registry = ExecutablesRegistry:new(registry_dir)
-  root_tree = nil
 end
 
 describe("executables with single test in file", function()

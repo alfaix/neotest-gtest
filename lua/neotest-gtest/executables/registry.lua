@@ -142,8 +142,6 @@ function ExecutablesRegistry:_restore_invariant(node_id)
 end
 
 function ExecutablesRegistry:_clear_children_executables(parent)
-  -- TODO: estimate how big can node2executable be (a few hundred?)
-  -- if it can be big, then it's better to keep a separate table for children
   for node, _ in pairs(self._node2executable) do
     if _is_ancestor(parent, node) then
       self._node2executable[node] = nil
@@ -152,35 +150,40 @@ function ExecutablesRegistry:_clear_children_executables(parent)
 end
 
 function ExecutablesRegistry:_sift_down_executable(node_id)
-  local parents = {}
-  for parent in self:_iter_parents(node_id) do
-    parents[#parents + 1] = parent
-    if self._node2executable[parent] ~= nil then
-      break
-    end
-  end
+  local my_executable = self._node2executable[node_id]
+  local configured_parent, parent_executable = self:_find_parent_with_executable(node_id)
 
-  if #parents == 0 then
-    return
+  if parent_executable == my_executable then
+    self._node2executable[node_id] = nil -- avoid duplicates, prefer parent configuration
+  elseif parent_executable ~= nil then
+    self:_sift_down_executable_from_parent(node_id, configured_parent)
   end
-  local parent_executable = self._node2executable[parents[#parents]]
-  if parent_executable == nil then
-    return
-  end
+end
 
-  if parent_executable == self._node2executable[node_id] then
-    self._node2executable[node_id] = nil
-    return
-  end
-
+function ExecutablesRegistry:_sift_down_executable_from_parent(node_id, configured_parent)
+  local parent_executable = self._node2executable[configured_parent]
+  local parents = utils.collect_iterable(self:_iter_parents(node_id))
   local parents_set = utils.list_to_set(parents)
+
   for _, parent in ipairs(parents) do
     for sibling in self:_iter_children(parent) do
       if not parents_set[sibling] and sibling ~= node_id then
         self._node2executable[sibling] = parent_executable
       end
     end
+
     self._node2executable[parent] = nil
+    if parent == configured_parent then
+      break
+    end
+  end
+end
+
+function ExecutablesRegistry:_find_parent_with_executable(node_id)
+  for parent in self:_iter_parents(node_id) do
+    if self._node2executable[parent] ~= nil then
+      return parent, self._node2executable[parent]
+    end
   end
 end
 
