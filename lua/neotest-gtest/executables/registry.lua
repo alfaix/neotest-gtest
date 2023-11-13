@@ -32,6 +32,7 @@ local function _merge_node_by_executable_groups(groups)
   end
   return exe2nodes
 end
+
 ---@class neotest-gtest.ExecutablesRegistry
 ---@field _root_dir string
 ---@field _storage neotest-gtest.Storage
