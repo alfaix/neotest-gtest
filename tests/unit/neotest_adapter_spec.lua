@@ -22,7 +22,7 @@ local function with_executable_per_node(exe2nodes)
         return convert_child_id_to_full_id(tree, child_id)
       end, nodes)
     end
-    return true, exe2nodes, nil
+    return exe2nodes, nil
   end
 end
 local function with_mock_executable_for_nodes(node_ids)
@@ -31,7 +31,7 @@ end
 
 local function with_executable_not_found()
   executables.find_executables = function(tree)
-    return false, nil, { tree:data().id }
+    return nil, { tree:data().id }
   end
 end
 
@@ -41,14 +41,14 @@ describe("adapter spec", function()
 
   before_each(function()
     old_find_executables = executables.find_executables
-    old_root = config.get_config().root
-    config.get_config().root = function()
+    old_root = config.root
+    config.root = function()
       return "/root"
     end
   end)
 
   after_each(function()
-    config.get_config().root = old_root
+    config.root = old_root
     executables.find_executables = old_find_executables
   end)
 

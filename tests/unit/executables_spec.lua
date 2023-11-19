@@ -1,10 +1,11 @@
-local utils = require("neotest-gtest.utils")
 local assert = require("luassert")
+local it = require("nio.tests").it
+
 local ExecutablesRegistry = require("neotest-gtest.executables.registry")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
-local tree_utils = require("tests.utils.tree")
-local it = require("nio.tests").it
 local executables_module = require("neotest-gtest.executables")
+local tree_utils = require("tests.utils.tree")
+local utils = require("neotest-gtest.utils")
 
 ---@type string
 local registry_dir
@@ -66,6 +67,16 @@ describe("executables with single test in file", function()
     assert.are.equal(#missing, 1)
   end)
 
+  it("throws error when the node does not belong to the tree", function()
+    setup()
+    local success, message = pcall(function()
+      registry:find_executables("doesnt_exist")
+    end)
+    assert.is_false(success)
+    assert(message)
+    assert.is_not_nil(string.find(message, "doesnt_exist"))
+  end)
+
   it("setting and getting executable for the same node returns it", function()
     setup()
     registry:update_executable(test_id, "/bin/exe1")
@@ -82,7 +93,7 @@ describe("executables with single test in file", function()
     setup()
     registry:update_executable(file_id, "/bin/exe1")
     local storage = require("neotest-gtest.storage"):new(registry._storage:path())
-    assert.are.same({ [file_id] = "/bin/exe1" }, storage:data())
+    assert.are.same({ [file_id] = "/bin/exe1" }, storage:node2executable())
   end)
 end)
 
@@ -182,7 +193,10 @@ describe("with three files in the tree", function()
 end)
 
 describe("test global registry", function()
-  local dir1, dir2, reg1, reg2
+  ---@type string
+  local dir1, dir2
+  ---@type neotest-gtest.ExecutablesRegistry
+  local reg1, reg2
 
   local function setup()
     dir1 = assert(vim.fn.tempname())
@@ -199,23 +213,14 @@ describe("test global registry", function()
     assert.are.equal(reg1, reg3)
   end)
 
-  it("lists executables from all registrys", function()
+  it("lists executables from all registries", function()
     setup()
-    reg1:update_executable(dir1 .. "/test.cpp", "/bin/exe1")
-    reg2:update_executable(dir2 .. "/test.cpp", "/bin/exe2")
+    reg1:update_executable(dir1 .. "/test_one.cpp", "/bin/exe1")
+    reg2:update_executable(dir2 .. "/test_one.cpp", "/bin/exe2")
 
-    local exes = GlobalRegistry:list_executables({ "/foo", "/bar" })
+    local exes = GlobalRegistry:list_executables({ dir1, dir2 })
     table.sort(exes)
 
-    assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
-  end)
-
-  it("list_executables lists executables from all roots", function()
-    setup()
-    reg1:update_executable(dir1 .. "/test.cpp", "/bin/exe1")
-    reg2:update_executable(dir2 .. "/test.cpp", "/bin/exe2")
-    local exes = executables_module.list_executables({ "/foo", "/bar" })
-    table.sort(exes)
     assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
   end)
 end)

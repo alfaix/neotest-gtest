@@ -46,7 +46,7 @@ function ExecutablesRegistry:new(normalized_root_dir)
   local registry = {
     _root_dir = normalized_root_dir,
     _storage = storage,
-    _node2executable = storage:data(),
+    _node2executable = storage:node2executable(),
     _tree = nil,
   }
 
@@ -56,7 +56,12 @@ end
 
 function ExecutablesRegistry:_reload_tree()
   local adapter_id = ADAPTER_PREFIX .. self._root_dir
-  self._tree = assert(neotest.state.positions(adapter_id))
+  local tree = neotest.state.positions(adapter_id)
+  -- lib.files.write("/home/alfaix/huuuh", vim.inspect(neotest.state.TRACKER.adapter_states))
+  if tree == nil then
+    error("tree with root " .. self._root_dir .. " not found")
+  end
+  self._tree = tree
 end
 
 ---@return string[]
@@ -127,7 +132,10 @@ end
 
 function ExecutablesRegistry:_iter_children(node_id)
   -- TODO: keep a root tree cached
-  local node = assert(self._tree:get_key(node_id))
+  local node = self._tree:get_key(node_id)
+  if node == nil then
+    error(string.format("tree %s does not contain node_id %s", self._tree:data().id, node_id))
+  end
   local children = node:children()
 
   return utils.map_list(function(child)

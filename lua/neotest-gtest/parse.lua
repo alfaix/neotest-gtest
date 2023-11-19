@@ -1,8 +1,10 @@
 local M = {}
 -- modeled after (copypasted with minimal changes from) neotest/lib/treesitter/init.lua
 
+local config = require("neotest-gtest.config")
 local nio = require("nio")
 local files = require("neotest.lib").files
+local ts_lib = require("neotest.lib").treesitter
 local types = require("neotest.types")
 
 local Tree = types.Tree
@@ -172,7 +174,7 @@ local function get_file_language(file_path)
   return require("nvim-treesitter.parsers").ft_to_lang(ft)
 end
 
-local function parser_get_tree(parser)
+local function parser_get_tree(lang_tree)
   -- Workaround for https://github.com/neovim/neovim/issues/21275
   -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
   if injections_text == nil then
@@ -182,7 +184,7 @@ local function parser_get_tree(parser)
   end
   vim.treesitter.query.set("cpp", "injections", "")
 
-  local root = parser:parse()[1]:root()
+  local root = ts_lib.fast_parse(lang_tree):root()
 
   vim.treesitter.query.set("cpp", "injections", injections_text)
   return root
@@ -190,8 +192,8 @@ end
 
 local function parse_positions_from_string(file_path, content)
   local lang = get_file_language(file_path)
-  local parser = vim.treesitter.get_string_parser(content, lang, nil)
-  local treesitter_tree = parser_get_tree(parser)
+  local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
+  local treesitter_tree = parser_get_tree(lang_tree)
   local tests_tree = collect_tests(file_path, content, treesitter_tree)
   local neotest_tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
@@ -201,7 +203,7 @@ end
 
 function M.parse_positions(file_path)
   -- throttle: can cause very high CPU load for large projects and freeze
-  nio.sleep(10)
+  nio.sleep(config.parsing_throttle_ms)
   local content = files.read(file_path)
   nio.scheduler()
   return parse_positions_from_string(file_path, content)

@@ -1,6 +1,6 @@
 local utils = require("neotest-gtest.utils")
 
-local storage_mode = utils.permissions("rw-------")
+local storage_mode = tonumber("600", 8)
 
 ---@class neotest-gtest.Storage
 ---@field private _data any
@@ -47,10 +47,6 @@ function Storage:new(path)
   else
     local json = read_sync(path)
     obj._data = json == "" and vim.empty_dict() or vim.json.decode(json)
-    if obj._data.node2exec ~= nil then
-      -- previously data was stored in node2exec, this is for compatibility
-      obj._data = obj._data.node2exec
-    end
   end
 
   return obj
@@ -58,6 +54,13 @@ end
 
 function Storage:data()
   return self._data
+end
+
+function Storage:node2executable()
+  if self._data.node2executable == nil then
+    self._data.node2executable = vim.empty_dict()
+  end
+  return self._data.node2executable
 end
 
 function Storage:path()

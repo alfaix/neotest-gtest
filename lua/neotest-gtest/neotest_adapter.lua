@@ -44,25 +44,38 @@ local function get_filters_for_node(node)
   end
 end
 
+local last_notified = 0
+
 ---Notifies the user that the given nodes they tried to test are not mapped to
 ---executables and require configuration.
 ---@param node_names string[]
 local function notify_nodes_missing_executables(node_names)
+  local now = os.time()
+  if now - last_notified < 2 then
+    return
+  end
+  last_notified = now
   vim.notify(
     string.format(
       "Some nodes do not have a corresponding GTest executable set. Please "
         .. "configure them by mraking them and then running :ConfigureGtest "
         .. "in the summary window. Nodes: %s",
-      node_names
+      table.concat(node_names, ", ")
     ),
     vim.log.levels.ERROR
   )
 end
 
+---@class neotest-gtest.NeotestAdapter
+---@field _tree neotest.Tree
+---@field _extra_args string
+---@field _strategy_name string
+---@field _output_counter integer
 local NeotestAdapter = {}
 ---Creates a new NeotestAdapter, which is responsible for creating neotest run
 ---specs
 ---@param args neotest.RunArgs
+---@return neotest-gtest.NeotestAdapter
 function NeotestAdapter:new(args)
   local adapter = {
     _tree = args.tree,
@@ -96,9 +109,8 @@ end
 ---@return table<string, neotest.Tree>|nil executable2nodes
 ---@private
 function NeotestAdapter:_try_group_nodes_by_executable()
-  local root = self:_get_normalized_root_dir()
-  local ok, exe2node_ids, missing = executables.find_executables(self._tree, root)
-  if not ok then
+  local exe2node_ids, missing = executables.find_executables(self._tree)
+  if exe2node_ids == nil then
     assert(missing, "find_executables must return nil if ok == false")
     notify_nodes_missing_executables(missing)
     return nil
@@ -108,14 +120,6 @@ function NeotestAdapter:_try_group_nodes_by_executable()
   return vim.tbl_map(function(node_ids)
     return self:_get_nodes_by_ids(node_ids)
   end, exe2node_ids)
-end
-
----@return string
----@private
-function NeotestAdapter:_get_normalized_root_dir()
-  local path = self._tree:data().path
-  local root = assert(config.get_config().root(path))
-  return utils.normalize_path(root)
 end
 
 ---@param node_ids string[]
@@ -143,7 +147,7 @@ end
 ---@private
 function NeotestAdapter:_build_spec_for_executable(executable, filters)
   local results_path = utils.new_results_dir({
-    history_size = config.get_config().history_size,
+    history_size = config.history_size,
   }) .. "test_result_" .. self._output_counter .. ".json"
 
   local command = vim.tbl_flatten({
@@ -173,7 +177,7 @@ function NeotestAdapter:_make_strategy_for_command(command)
 
   return {
     name = "Debug with neotest-gtest",
-    type = config.get_config().debug_adapter,
+    type = config.debug_adapter,
     request = "launch",
     program = command[1],
     args = { unpack(command, 2) },

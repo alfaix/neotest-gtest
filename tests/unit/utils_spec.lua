@@ -1,5 +1,10 @@
+local nio = require("nio")
+local helpers = require("tests.utils.helpers")
 local assert = require("luassert")
 local utils = require("neotest-gtest.utils")
+local config = require("neotest-gtest.config")
+local it = nio.tests.it
+local lib = require("neotest.lib")
 
 ---@source https://stackoverflow.com/questions/6380820/get-containing-path-of-lua-file
 local function script_path()
@@ -8,11 +13,8 @@ local function script_path()
 end
 
 describe("helper functions", function()
-  it("check test file", function()
-    assert.is_true(utils.is_test_file("foo/bar/test_foo.cpp"))
-    assert.is_true(utils.is_test_file("foo/bar/foo_test.cc"))
-    assert.is_false(utils.is_test_file("foo/bar/no.cc"))
-    assert.is_false(utils.is_test_file("foo/bar/test_stuff"))
+  after_each(function()
+    config.reset()
   end)
 
   describe("path-related helpers", function()
@@ -59,13 +61,6 @@ describe("helper functions", function()
     assert.is.Nil(words)
   end)
 
-  it("permissions string matches the mask", function()
-    assert.are.equal(0, utils.permissions("---------"))
-    assert.are.equal(438, utils.permissions("rw-rw-rw-"))
-    assert.are.equal(292, utils.permissions("r--r--r--"))
-    assert.are.equal(511, utils.permissions("rwxrwxrwx"))
-  end)
-
   it("mtime is read and compared correctly", function()
     local mtime1, err = utils.getmtime(script_path() .. "utils_spec.lua")
     assert.is.Nil(err)
@@ -75,6 +70,8 @@ describe("helper functions", function()
     local mtime2
     mtime2, err = utils.getmtime(tmp)
     assert.is.Nil(err)
+    assert(mtime2)
+    assert(mtime1)
     assert.is_true(utils.mtime_lt(mtime1, mtime2))
     assert.is_true(utils.mtime_eq(mtime1, mtime1))
     assert.is_true(utils.mtime_eq(mtime2, mtime2))
@@ -116,5 +113,49 @@ describe("helper functions", function()
       return x + 1
     end, list))
     assert.are.same({ 2, 3, 4 }, mapped)
+  end)
+
+  it("copy() creates a shallow copy of the table", function()
+    local t1 = { a = 1, b = 2 }
+    local t2 = utils.tbl_copy(t1)
+    assert.are.same(t1, t2)
+    assert.is_false(t1 == t2)
+  end)
+
+  it("normalized_root() normalizes user-supplied root", function()
+    config.setup({
+      root = function(path)
+        return "/usr/"
+      end,
+    })
+    assert.are.equal("/usr", utils.normalized_root("anything"))
+  end)
+
+  it("check position2root", function()
+    local tempdir = helpers.mktempdir()
+
+    local function makeroot(root)
+      local full_root = string.format("%s/%s", tempdir, root)
+      nio.uv.fs_mkdir(full_root, tonumber("700", 8))
+      lib.files.write(full_root .. "/compile_commands.json", "irrelevant")
+    end
+    local function check_root_for_position(expected, position)
+      if expected ~= "<notfound>" then
+        expected = string.format("%s/%s", tempdir, expected)
+      end
+      position = string.format("%s/%s", tempdir, position)
+      assert.are.equal(expected, utils.position2root(position) or "<notfound>")
+    end
+
+    makeroot("root1")
+    makeroot("root1/nestedroot")
+
+    check_root_for_position("root1", "root1")
+    check_root_for_position("root1", "root1/a")
+    check_root_for_position("root1", "root1/a/b/c.cpp::TestOne.Foo")
+    check_root_for_position("root1", "root1::a::b::c")
+    check_root_for_position("root1/nestedroot", "root1/nestedroot")
+    check_root_for_position("root1/nestedroot", "root1/nestedroot/a")
+    check_root_for_position("<notfound>", "somedir")
   end)
 end)

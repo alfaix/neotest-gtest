@@ -1,7 +1,7 @@
+local MockProject = require("tests.utils.mock_project")
 local parse_module = require("neotest-gtest.parse")
 local lib = require("neotest.lib")
 local assert = require("luassert")
-local Tree = require("neotest.types.tree")
 
 local M = {}
 
@@ -67,31 +67,6 @@ local function assert_namespace_meets_spec(namespace, spec)
   end
 end
 
-local _neotest_state = {
-  adapter2tree = {},
-}
-function _neotest_state.positions(_adapter_id)
-  local tree = _neotest_state.adapter2tree[_adapter_id]
-  if tree == nil then
-    error(vim.inspect({ _neotest_state.adapter2tree, _adapter_id }))
-  end
-  assert.is_not_nil(tree)
-  return tree
-end
-
-function _neotest_state.adapter_ids()
-  return vim.tbl_keys(_neotest_state.adapter2tree)
-end
-
-local function mock_neotest_state(tree)
-  -- TODO: proper mocks?
-  local neotest = require("neotest")
-  local adapter_id = "neotest-gtest:" .. tree:data().path
-  _neotest_state.adapter2tree[adapter_id] = tree
-
-  neotest.state = _neotest_state
-end
-
 ---Ensures that `spec` is represented by the `tree`
 ---@param tree neotest.Tree
 ---@param spec any
@@ -120,31 +95,9 @@ function M.parse_tree_from_string(string)
 end
 
 function M.make_directory_tree(fname2content, dirpath)
-  if dirpath == nil then
-    dirpath = vim.fn.tempname()
-  end
-  require("plenary.path"):new(dirpath):mkdir()
-
-  local root_data = {
-    id = dirpath,
-    name = vim.fn.fnamemodify(dirpath, ":t"),
-    path = dirpath,
-    type = "dir",
-  }
-  local nodes_list = { root_data }
-
-  for fname, content in pairs(fname2content) do
-    local fpath = dirpath .. "/" .. fname
-    lib.files.write(fpath, content)
-    local file_node = parse_module.parse_positions(fpath)
-    nodes_list[#nodes_list + 1] = file_node:to_list()
-  end
-
-  local tree = Tree.from_list(nodes_list, function(node_data)
-    return node_data.id
-  end)
-  mock_neotest_state(tree)
-  return tree
+  local project = MockProject:new(dirpath)
+  project:set_contents(fname2content)
+  return project:get_tree()
 end
 
 return M

@@ -1,4 +1,5 @@
 local scandir = require("plenary.scandir")
+local config = require("neotest-gtest.config")
 local Path = require("plenary.path")
 local M = {}
 
@@ -9,46 +10,9 @@ local runs_dir = Path:new(stddata .. "/neotest-gtest/runs")
 local storage_dir = stddata .. "/neotest-gtest"
 M.storage_dir = storage_dir
 
-local permissions_table = {
-  -- user r/w/x
-  tonumber("00400", 8),
-  tonumber("00200", 8),
-  tonumber("00100", 8),
-  -- group r/w/x
-  tonumber("00040", 8),
-  tonumber("00020", 8),
-  tonumber("00010", 8),
-  -- others r/w/x
-  tonumber("00004", 8),
-  tonumber("00002", 8),
-  tonumber("00001", 8),
-}
-
----Creates a permissions mode number from a string.
----@param str string in the format "rwxrwxrwx", where any letter can be "-" to indicate no permission. Note that the letters themselves are ignored, only order matters.
----@return integer the permissions mode number
-function M.permissions(str)
-  assert(#str == #permissions_table, "mode string mut have 9 chars, e.g. rw-rwxrwx")
-  local mode = 0
-  for i = 1, #str do
-    if str:sub(i, i) ~= "-" then
-      mode = bit.bor(mode, permissions_table[i])
-    end
-  end
-  return mode
-end
-
-local mode = M.permissions("rwx------")
+local mode = tonumber("700", 8)
 Path:new(storage_dir):mkdir({ exist_ok = true, mode = mode })
 Path:new(runs_dir):mkdir({ exist_ok = true, mode = mode })
-
-M.test_extensions = {
-  ["cpp"] = true,
-  ["cppm"] = true,
-  ["cc"] = true,
-  ["cxx"] = true,
-  ["c++"] = true,
-}
 
 ---@class neotest-gtest.mtime
 ---@field sec number Unix timestamp of file's mtime
@@ -78,13 +42,14 @@ end
 
 ---Returns mtime table for the file at `path`
 ---@param path string path to the file to inspect
----@return neotest-gtest.mtime mtime table for the file at `path`
----@return string error message if an error occurred
+---@return neotest-gtest.mtime? mtime table for the file at `path`
+---@return string? error message if an error occurred
 function M.getmtime(path)
   local stat, e = vim.loop.fs_stat(path)
   if e then
     return nil, e
   end
+  assert(stat, "stat must be non-nil if there is no error")
   return stat.mtime, nil
 end
 
@@ -97,33 +62,11 @@ function M.fexists(path)
   if e then
     return false, e
   end
+  assert(stat, "stat must be non-nil if there is no error")
   if stat.type == "file" then
     return true, nil
   end
-  -- TODO check it's executable? permissions and shit
   return false, string.format("Expected regular file, found %s instead", stat.type)
-end
-
----Analyzes the path to determine whether the file is a C++ test file or not.
----
----Simply checks if the file fits either "test_*.ext" or "*_test.ext" pattern,
----where ext is one of the extensions in `M.test_extensions`.
----
----@param file_path string the path to analyze
----@return boolean true if `path` is a test file, false otherwise.
-function M.is_test_file(file_path)
-  local elems = vim.split(file_path, Path.path.sep, { plain = true })
-  local filename = elems[#elems]
-  if filename == "" then -- directory
-    return false
-  end
-  local extsplit = vim.split(filename, ".", { plain = true })
-  local extension = extsplit[#extsplit]
-  local fname_last_part = extsplit[#extsplit - 1]
-  local result = M.test_extensions[extension]
-      and (vim.startswith(filename, "test_") or vim.endswith(fname_last_part, "_test"))
-    or false
-  return result
 end
 
 ---Normalizes the path. This ensures that all paths pointing to the same file
@@ -272,6 +215,32 @@ function M.collect_iterable(...)
     table.insert(list, v)
   end
   return list
+end
+
+function M.tbl_copy(t)
+  local t2 = {}
+  for k, v in pairs(t) do
+    t2[k] = v
+  end
+  return t2
+end
+
+function M.position2root(position)
+  local delimeter_index = string.find(position, "::")
+  local path
+  if delimeter_index == nil then
+    path = position
+  else
+    path = string.sub(position, 1, delimeter_index - 1)
+  end
+  return M.normalized_root(path)
+end
+
+function M.normalized_root(path)
+  local root_path = config.root(path)
+  if root_path ~= nil then
+    return M.normalize_path(root_path)
+  end
 end
 
 return M

@@ -11,10 +11,6 @@ local function tree2ids(tree)
   end, tree:children()) }
 end
 
-function YELL_TREE(tree)
-  error(vim.inspect(tree2ids(tree)))
-end
-
 local function sort_filters_arg(filters_arg)
   local filters = vim.split(filters_arg, ":", { plain = true })
   table.sort(filters)
