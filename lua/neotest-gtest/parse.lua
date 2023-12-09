@@ -1,17 +1,57 @@
 local M = {}
 -- modeled after (copypasted with minimal changes from) neotest/lib/treesitter/init.lua
 
+local config = require("neotest-gtest.config")
 local nio = require("nio")
 local files = require("neotest.lib").files
+local ts_lib = require("neotest.lib").treesitter
 local types = require("neotest.types")
 
 local Tree = types.Tree
 local injections_text = nil
 
+-- treesitter matches TEST macros as function definitions
+-- treesitter cannot possibly know about macros defined in other files, so this
+-- is the best we can do. It works pretty well though.
+-- under C standard, they are valid definitions with implicit int return type
+-- (and with proper compiler flags the CPP code should also compile which should
+--  mean that treesitter should continue to parse these as function definitions)
+-- Thus, we match all function definitions that meet ALL of the following criteria:
+-- * Named TEST/TEST_F/TEST_P (#any-of)
+-- * Do not declare a return type (!type)
+-- * Only have two parameters (. anchors)
+-- * Both parameters are unnamed (!declarator)
+-- * Both parameters' type is a simple type_identifier, i.e., no references
+--   or cv-qualifiers or templates (type: (type_identifier))
+-- The first parameter is the test suite, the second one is the test case
+-- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
+local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
+  "cpp",
+  [[
+  ((function_definition
+    declarator: (
+        function_declarator
+          declarator: (identifier) @test.kind
+        parameters: (
+          parameter_list
+            . (comment)*
+            . (parameter_declaration type: (type_identifier) !declarator) @namespace.name
+            . (comment)*
+            . (parameter_declaration type: (type_identifier) !declarator) @test.name
+            . (comment)*
+        )
+      )
+      !type
+  )
+  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P"))
+  @test.definition
+]]
+)
+
 ---Extracts test positions from a source using the given query
----@param query vim.treesitter.Query The query to use
+---@param query Query The query to use
 ---@param source string The text of the source file.
----@param root vim.treesitter.LanguageTree The root of the tree
+---@param root LanguageTree The root of the tree
 ---@return table
 ---@return table
 local function extract_captures(
@@ -22,10 +62,9 @@ local function extract_captures(
   -- Namespace definition doesn't really exist as namespace is a made up
   -- construct in GTest used only to group tests together. We set its range
   -- from start of first test to end of last test.
-  -- Technically a namespace can be spread across multiple files, but that's
-  -- not my problem.
+  -- Technically a namespace can be spread across multiple files, or be
+  -- interleaving, this is rare though (I think?) so we're ignoring it.
 
-  -- TODO support TEST_P properly with instantiation
   local namespaces = {}
   local tests = {}
   pcall(vim.tbl_add_reverse_lookup, query.captures)
@@ -119,7 +158,7 @@ local function build_tree(fileobj, namespaces, tests)
   return tree
 end
 
-local function collect_tests(file_path, query, source, root)
+local function collect_tests(file_path, source, root)
   local path_elems = vim.split(file_path, files.sep, { plain = true })
   local fileobj = {
     id = file_path,
@@ -128,36 +167,48 @@ local function collect_tests(file_path, query, source, root)
     name = path_elems[#path_elems],
     range = { root:range() },
   }
-  local namespaces, tests = extract_captures(query, source, root)
+  local namespaces, tests = extract_captures(TREESITTER_GTEST_QUERY, source, root)
   return build_tree(fileobj, namespaces, tests)
 end
 
-function M.parse_positions_from_string(file_path, query, content)
+local function get_file_language(file_path)
   local ft = files.detect_filetype(file_path)
-  local lang = require("nvim-treesitter.parsers").ft_to_lang(ft)
-  nio.scheduler()
-  local parser = vim.treesitter.get_string_parser(content, lang, nil)
+  return require("nvim-treesitter.parsers").ft_to_lang(ft)
+end
+
+local function parser_get_tree(lang_tree)
   -- Workaround for https://github.com/neovim/neovim/issues/21275
   -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
   if injections_text == nil then
     -- TODO can there be more than one?...
-    local injection_file = vim.treesitter.query.get_files('cpp', 'injections')[1]
+    local injection_file = vim.treesitter.query.get_files("cpp", "injections")[1]
     injections_text = files.read(injection_file)
   end
-  vim.treesitter.query.set('cpp', 'injections', '')
-  local root = parser:parse()[1]:root()
-  vim.treesitter.query.set('cpp', 'injections', injections_text)
-  local tests_tree = collect_tests(file_path, query, content, root)
-  local tree = Tree.from_list(tests_tree, function(pos)
-    return pos.id
-  end)
-  return tree
+  vim.treesitter.query.set("cpp", "injections", "")
+
+  local root = ts_lib.fast_parse(lang_tree):root()
+
+  vim.treesitter.query.set("cpp", "injections", injections_text)
+  return root
 end
 
-function M.parse_positions(file_path, query)
-  nio.sleep(10)
+local function parse_positions_from_string(file_path, content)
+  local lang = get_file_language(file_path)
+  local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
+  local treesitter_tree = parser_get_tree(lang_tree)
+  local tests_tree = collect_tests(file_path, content, treesitter_tree)
+  local neotest_tree = Tree.from_list(tests_tree, function(pos)
+    return pos.id
+  end)
+  return neotest_tree
+end
+
+function M.parse_positions(file_path)
+  -- throttle: can cause very high CPU load for large projects and freeze
+  nio.sleep(config.parsing_throttle_ms)
   local content = files.read(file_path)
-  return M.parse_positions_from_string(file_path, query, content)
+  nio.scheduler()
+  return parse_positions_from_string(file_path, content)
 end
 
 return M
