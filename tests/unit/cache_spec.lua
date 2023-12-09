@@ -1,5 +1,7 @@
+local nio = require("nio")
 local assert = require("luassert")
 local utils = require("neotest-gtest.utils")
+local it = require("nio.tests").it
 
 local Storage = require("neotest-gtest.storage")
 
@@ -22,31 +24,27 @@ describe("storage library", function()
   ---Creates a temporary storage
   ---@return neotest-gtest.Storage
   local function make_tmp_storage()
-    local tmppath = assert(vim.fn.tempname())
+    local tmppath = assert(nio.fn.tempname())
     return new_storage(tmppath)
   end
 
-  after_each(function()
-    for _, storage in ipairs(_storages) do
-      storage:drop()
-    end
-  end)
-
-  it("Storage is created and deleted", function()
+  it("Storage is created", function()
     local storage = make_tmp_storage()
     assert.is_true(utils.fexists(storage:path()))
   end)
 
   it("Storage is deleted", function()
     local storage = make_tmp_storage()
+    storage:data()["k"] = "v"
     storage:drop()
     assert.is_false(utils.fexists(storage:path()))
+    assert.is_nil(storage:data()["k"])
   end)
 
   it("Storage preserves information", function()
     local storage = make_tmp_storage()
     storage:data()["key"] = { value = "foo" }
-    storage:flush(true)
+    storage:flush()
     local storage2 = Storage:new(storage:path())
     assert.are.equal("foo", storage2:data().key.value)
   end)

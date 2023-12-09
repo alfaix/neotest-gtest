@@ -10,68 +10,99 @@ namespace irrelevant {
 
 void fillthisline() {} // so that automatically formatted code isn't ugly
 
-TEST(TestOne, TestFailure) {
+TEST(TestOne, TestFailure) { // NODE:TestOne::TestFailure,failed
   fillthisline();
   std::cerr << "TODO display this in summary (somehow), not in json"
             << std::endl;
-  ASSERT_FALSE(true);
-}
+  ASSERT_FALSE(true); /* MESSAGE:
+  Value of: true
+    Actual: true
+  Expected: false
+  */
+} // NODEEND
 
-TEST(TestOne, TestEQFailure) {
+TEST(TestOne, TestEQFailure) { // NODE:TestOne::TestEQFailure,failed
   fillthisline();
   const int a = 0;
-  const int b = 0;
-  ASSERT_EQ(&a, &b);
+  const int b = 1;
+  ASSERT_EQ(a, b); /* MESSAGE:
+  Expected equality of these values:
+    a
+      Which is: 0
+    b
+      Which is: 1
+  */
+} // NODEEND
+
+void fail() {
+  EXPECT_EQ(0, 1); /* MESSAGE:TestOne::TestNestedFailure
+  Expected equality of these values:
+    0
+    1
+  */
 }
 
-void fail() { EXPECT_EQ(0, 1); }
-
-TEST(TestOne, TestNestedFailure) {
+TEST(TestOne, TestNestedFailure) { // NODE:TestOne::TestNestedFailure,failed
   fillthisline();
   ::irrelevant::fail();
-}
+} // NODEEND
 
-TEST(TestOne, TestOtherFileFailure) {
+TEST(TestOne, // NODE:TestOne::TestOtherFileFailure,failed
+     TestOtherFileFailure) {
   fillthisline();
+  /* MESSAGE:
+     Expected equality of these values:
+       0
+       1
+  */
   ::fail();
-}
+} // NODEEND
 
-TEST(TestOne, TestExceptionFailure) {
+TEST(TestOne, // NODE:TestOne::TestExceptionFailure,failed
+     TestExceptionFailure) {
   fillthisline();
-  throw std::runtime_error("oh no!");
-}
+  throw std::runtime_error("oh no!"); /* MESSAGE:NOLINE
+  C++ exception with description "oh no!" thrown in the test body.
+  */
+} // NODEEND
 
-TEST(TestOne, TestThrowInteger) {
+TEST(TestOne, TestThrowInteger) { // NODE:TestOne::TestThrowInteger,failed
   fillthisline();
-  throw 0;
-}
+  throw 0; /* MESSAGE:NOLINE
+   Unknown C++ exception thrown in the test body.
+   */
+} // NODEEND
 
 // TODO death tests
 
-TEST(TestOne, TestMultipleFailures) {
-  EXPECT_TRUE(false);
-  EXPECT_FALSE(true);
-  EXPECT_EQ(1, 2);
-}
+TEST(TestOne, // NODE:TestOne::TestMultipleFailures,failed
+     TestMultipleFailures) {
+  EXPECT_TRUE(false); /* MESSAGE:
+  Value of: false
+    Actual: false
+  Expected: true
+  */
+  EXPECT_FALSE(true); /* MESSAGE:
+   Value of: true
+     Actual: true
+   Expected: false
+   */
+  EXPECT_EQ(1, 2);    /* MESSAGE:
+   Expected equality of these values:
+     1
+     2
+   */
+} // NODEEND
 
-TEST(TestOne, TestSkipMe) {
+TEST(TestOne, TestSkipMe) { // NODE:TestOne::TestSkipMe,skipped
   fillthisline();
   GTEST_SKIP() << "Skipped because why not";
-}
+} // NODEEND
 
-TEST(TestOneMore, TestMultipleNamespaces) {
+TEST(TestOneMore, // NODE:TestOneMore::TestMultipleNamespaces,passed
+     TestMultipleNamespaces) {
   fillthisline();
   ASSERT_TRUE(true);
-}
-
-/* class FixtureP : public ::testing::TestWithParam<int> {}; */
-
-/* TEST_P(FixtureP, TestP) { */
-/*   fillthisline(); */
-/*   ASSERT_EQ(GetParam(), 2); */
-/* } */
-
-/* INSTANTIATE_TEST_SUITE_P(ParametrizedTest, FixtureP, testing::Values(1, 2,
- * 3)); */
+} // NODEEND
 
 } // namespace irrelevant

@@ -1,24 +1,12 @@
+local nio = require("nio")
+local lib = require("neotest.lib")
 local utils = require("neotest-gtest.utils")
-
-local storage_mode = tonumber("600", 8)
 
 ---@class neotest-gtest.Storage
 ---@field private _data any
 ---@field private _path string
 local Storage = {}
 local _loaded_storages = {}
-
--- I think this might've been true for the old autocmd flush stuff, but no longer true.
--- TODO: move to async stuff if it can be used
--- can't use async.uv.something because the rest of the handler is called in the callback
--- @return string contents Contents of the file at `file_path`
-local function read_sync(file_path)
-  local file_fd = assert(vim.loop.fs_open(file_path, "r", 438))
-  local stat = assert(vim.loop.fs_fstat(file_fd))
-  local data = assert(vim.loop.fs_read(file_fd, stat.size, 0))
-  assert(vim.loop.fs_close(file_fd))
-  return data
-end
 
 ---Creates a new storage
 ---@param path string Directory for which the storage shall maintain executables.
@@ -42,11 +30,11 @@ function Storage:new(path)
   setmetatable(obj, { __index = Storage })
 
   local exists, _ = utils.fexists(path)
-  if not exists then
-    obj:flush(true) -- create the file
-  else
-    local json = read_sync(path)
+  if exists then
+    local json = lib.files.read(path)
     obj._data = json == "" and vim.empty_dict() or vim.json.decode(json)
+  else
+    obj:flush(true) -- create the file
   end
 
   return obj
@@ -74,17 +62,12 @@ function Storage:flush(sync)
   if as_json == nil then
     return
   end
-  local file_fd = assert(vim.loop.fs_open(self._path, "w", storage_mode))
-  local nbytes = assert(vim.loop.fs_write(file_fd, as_json, 0))
-  assert(nbytes == #as_json, nbytes)
-  if sync then
-    assert(vim.loop.fs_fsync(file_fd))
-  end
-  assert(vim.loop.fs_close(file_fd))
+  lib.files.write(self._path, as_json)
 end
 
 function Storage:drop()
-  return vim.loop.fs_unlink(self._path)
+  self._data = vim.empty_dict()
+  return nio.uv.fs_unlink(self._path)
 end
 
 return Storage

@@ -1,9 +1,9 @@
+local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local assert = require("luassert")
 local Report = require("neotest-gtest.report")
-local helpers = require("tests.utils.helpers")
-local config = require("neotest-gtest.config")
 local tree_utils = require("tests.utils.tree")
+local ReportSpec = require("tests.utils.report")
 
 local TEST_TIMESTAMP = "2023-01-01T00:00:00Z"
 local FILENAME = "/test_one.cpp"
@@ -38,67 +38,18 @@ local function tree_with_data(id, data)
   }
 end
 
-local colors = config.summary_view.shell_palette
-local header_length = config.summary_view.header_length
-local function assert_header_matches_spec(header, spec)
-  local expected_color = colors[spec.status] .. colors.bold
-  assert.is_not_nil(expected_color)
-  local pattern = "^([^_]*)%_+(%a+)%.(%a+)%_+([^_]+)"
-  local color, namespace, name, color_stop = string.match(header, pattern)
-  assert.are.same(#header - #color - #color_stop, header_length, header)
-  assert.are.same(expected_color, color)
-  assert.are.same(namespace, spec.namespace)
-  assert.are.same(name, spec.name)
-  assert.are.same(colors.stop, color_stop)
-end
-
-local function assert_body_matches_spec(body, spec)
-  spec.summary = helpers.string_replace(spec.summary, "{TIMESTAMP}", TEST_TIMESTAMP)
-  spec.summary = helpers.dedent(spec.summary)
-
-  body = helpers.string_replace(body, colors.bold, "{BOLD}")
-  body = helpers.string_replace(body, colors.failed, "{RED}")
-  body = helpers.string_replace(body, colors.passed, "{GREEN}")
-  body = helpers.string_replace(body, colors.stop, "{STOP}")
-  -- assert.are.same({ string.byte(spec.summary, 0, #spec.summary) }, { string.byte(body, 0, #body) })
-  assert.are.same(spec.summary, body)
-end
-
-local function assert_summary_matches_spec(summary, spec)
-  local lineend = string.find(summary, "\n", 1, true)
-  local header = summary:sub(1, lineend - 1)
-  local body = summary:sub(lineend + 1)
-  assert_header_matches_spec(header, spec)
-  assert_body_matches_spec(body, spec)
-end
-
-local function assert_errors_match_spec(errors, spec)
-  spec.errors = spec.errors or {}
-  local cmp = function(a, b)
-    return a.message < b.message
-  end
-  table.sort(errors, cmp)
-  table.sort(spec.errors, cmp)
-
-  for i, error in ipairs(errors) do
-    assert.are.same(spec.errors[i].message, error.message)
-    assert.are.same(spec.errors[i].line, error.line)
-  end
-end
-
-local function assert_neotest_reulst_matches_spec(result, spec)
-  assert.are.same(spec.status, result.status)
-  assert.are.same(MOCK_OUTPUT_FILE, result.output)
-  assert_summary_matches_spec(result.short, spec)
-  assert_errors_match_spec(result.errors, spec)
+local function _enrich_spec(spec)
+  spec = utils.tbl_copy(spec)
+  spec.filename = FILENAME
+  spec.timestamp = TEST_TIMESTAMP
+  spec.output_file = MOCK_OUTPUT_FILE
+  return spec
 end
 
 local function assert_report_matches_spec(report, spec)
-  local id = table.concat({ FILENAME, spec.namespace, spec.name }, "::")
-  assert.are.same(id, report:position_id())
-
-  local neotest_report = report:to_neotest_report(MOCK_OUTPUT_FILE)
-  assert_neotest_reulst_matches_spec(neotest_report, spec)
+  spec = _enrich_spec(spec)
+  local report_spec = ReportSpec:new(spec)
+  report_spec:assert_matches_report(report)
 end
 
 describe("report", function()
@@ -300,23 +251,44 @@ describe("report builder", function()
     for _, key in ipairs(expected_keys) do
       local spec = position2spec[key]
       spec.position_id = key
-      local report = results[key]
-      assert_neotest_reulst_matches_spec(report, spec)
+      local neotest_result = results[key]
+      spec = ReportSpec:new(_enrich_spec(spec))
+      spec:assert_matches_neotest_result(neotest_result)
+    end
+  end
+
+  local function make_neotest_results(opts)
+    local default_opts = {
+      command = { "/usr/bin/env" }, -- must exist
+      results_path = json_path,
+      code = 0,
+      output = MOCK_OUTPUT_FILE,
+      expect_error = false,
+    }
+    opts = vim.tbl_extend("force", default_opts, opts or {})
+
+    local converter = Report.converter:new(
+      { command = opts.command, context = { results_path = opts.results_path, positions = {} } },
+      { code = opts.code, output = opts.output },
+      tree
+    )
+    local ok, message_or_results = pcall(function()
+      return converter:make_neotest_results()
+    end)
+    if opts.expect_error == ok then
+      error(vim.inspect(message_or_results))
+    end
+    assert.are.equal(opts.expect_error, not ok)
+    if ok then
+      return message_or_results
+    else
+      return message_or_results
     end
   end
 
   it("builder happy path creates correct reports", function()
     setup()
-    local run_spec = {
-      command = { "/some-command" },
-      context = { results_path = json_path },
-    }
-    local neotest_result = {
-      code = 0,
-      output = MOCK_OUTPUT_FILE,
-    }
-    local converter = Report.converter:new(run_spec, neotest_result, tree)
-    local results = converter:make_neotest_results()
+    local results = make_neotest_results()
     assert_results_match_spec(results, {
       [dirpath .. "/test_one.cpp::TestOne::Foo"] = {
         name = "Foo",
@@ -334,22 +306,20 @@ describe("report builder", function()
   end)
 
   it("builder throws error if file does not exist", function()
-    local run_spec = {
-      command = { "/some-command" },
-      context = { results_path = "/doesntexist" },
-    }
-    local neotest_result = {
-      code = 1,
-      output = "/somepath",
-    }
-    local converter = Report.converter:new(run_spec, neotest_result, tree)
-    local ok, message = pcall(function()
-      converter:make_neotest_results()
-    end)
-    assert.is_false(ok)
-    assert(message) -- appease the type checker
-    assert.is_not_nil(
-      string.find(message, "Command: /some-command, exit code: 1, output at: /somepath", 1, true)
-    )
+    local message = make_neotest_results({ expect_error = true, results_path = "/doesntexist" })
+    ---@cast message string
+    local expected = "Command: /usr/bin/env, exit code: 0, output at: " .. MOCK_OUTPUT_FILE
+    assert.is_not_nil(string.find(message, expected, 1, true))
+  end)
+
+  it("builder throws error if executable does not exist", function()
+    local message = make_neotest_results({
+      expect_error = true,
+      command = { "/doesntexist" },
+      results_path = "/doesntexist",
+    })
+    ---@cast message string
+    local expected = "/doesntexist not found"
+    assert.is_not_nil(string.find(message, expected, 1, true))
   end)
 end)

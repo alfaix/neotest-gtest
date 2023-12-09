@@ -90,7 +90,7 @@ describe("adapter spec", function()
       TEST(TestOne, Bar) {}
       ]],
       {
-        input_tree = "TestOne::Bar",
+        input_key = "TestOne::Bar",
         command = { MOCK_EXECUTABLE, "--gtest_filter=TestOne.Bar" },
         allow_extra_args = true,
       }
@@ -160,8 +160,8 @@ describe("adapter spec", function()
         TEST(TestThree, Bar) {}
       ]],
     }, {
-      neotest_specs = {
-        { command = { MOCK_EXECUTABLE, "--gtest_filter=TestOne.*:TestTwo.*:TestThree.*" } },
+      commands = {
+        { MOCK_EXECUTABLE, "--gtest_filter=TestOne.*:TestTwo.*:TestThree.*" },
       },
       allow_extra_args = true,
     })
@@ -188,9 +188,9 @@ describe("adapter spec", function()
         TEST(TestThree, Bar) {}
       ]],
     }, {
-      neotest_specs = {
-        { command = { "/bin/exe1", "--gtest_filter=TestOne.*:TestOneMore.*:TestTwo.*" } },
-        { command = { "/bin/exe2", "--gtest_filter=TestThree.*" } },
+      commands = {
+        { "/bin/exe1", "--gtest_filter=TestOne.*:TestOneMore.*:TestTwo.*" },
+        { "/bin/exe2", "--gtest_filter=TestThree.*" },
       },
       allow_extra_args = true,
     })

@@ -19,7 +19,7 @@ describe("helper functions", function()
 
   describe("path-related helpers", function()
     it("paths pointing to the same file normalize to identical strings", function()
-      assert.are.equal(utils.normalize_path("~/foo/bar"), vim.fn.expand("~/foo/bar", nil, nil))
+      assert.are.equal(utils.normalize_path("~/foo/bar"), nio.fn.expand("~/foo/bar", nil, nil))
       assert.are.equal(utils.normalize_path("/foo/bar"), "/foo/bar")
       assert.are.equal(utils.normalize_path("/foo/bar"), "/foo/bar")
       assert.are.equal(utils.normalize_path("/foo/bar/"), utils.normalize_path("/foo/bar"))
@@ -65,8 +65,8 @@ describe("helper functions", function()
     local mtime1, err = utils.getmtime(script_path() .. "utils_spec.lua")
     assert.is.Nil(err)
 
-    local tmp = vim.fn.tempname()
-    vim.fn.writefile({ "foo" }, tmp, "s")
+    local tmp = nio.fn.tempname()
+    nio.fn.writefile({ "foo" }, tmp, "s")
     local mtime2
     mtime2, err = utils.getmtime(tmp)
     assert.is.Nil(err)
@@ -129,33 +129,5 @@ describe("helper functions", function()
       end,
     })
     assert.are.equal("/usr", utils.normalized_root("anything"))
-  end)
-
-  it("check position2root", function()
-    local tempdir = helpers.mktempdir()
-
-    local function makeroot(root)
-      local full_root = string.format("%s/%s", tempdir, root)
-      nio.uv.fs_mkdir(full_root, tonumber("700", 8))
-      lib.files.write(full_root .. "/compile_commands.json", "irrelevant")
-    end
-    local function check_root_for_position(expected, position)
-      if expected ~= "<notfound>" then
-        expected = string.format("%s/%s", tempdir, expected)
-      end
-      position = string.format("%s/%s", tempdir, position)
-      assert.are.equal(expected, utils.position2root(position) or "<notfound>")
-    end
-
-    makeroot("root1")
-    makeroot("root1/nestedroot")
-
-    check_root_for_position("root1", "root1")
-    check_root_for_position("root1", "root1/a")
-    check_root_for_position("root1", "root1/a/b/c.cpp::TestOne.Foo")
-    check_root_for_position("root1", "root1::a::b::c")
-    check_root_for_position("root1/nestedroot", "root1/nestedroot")
-    check_root_for_position("root1/nestedroot", "root1/nestedroot/a")
-    check_root_for_position("<notfound>", "somedir")
   end)
 end)

@@ -1,11 +1,10 @@
 local lazypath = vim.fn.stdpath("data") .. "/lazy"
+
+local plugins = { "plenary.nvim", "nvim-dap", "nvim-treesitter", "neotest" }
+
 vim.notify = print
-vim.opt.rtp:append(".")
-vim.opt.rtp:append(lazypath .. "/plenary.nvim")
-vim.opt.rtp:append(lazypath .. "/nvim-dap")
-vim.opt.rtp:append(lazypath .. "/nvim-treesitter")
-vim.opt.rtp:append(lazypath .. "/neotest")
 vim.opt.swapfile = false
-HUH = function(...)
-  print(vim.inspect(...))
+vim.opt.rtp:append(".")
+for _, plugin in ipairs(plugins) do
+  vim.opt.rtp:append(lazypath .. "/" .. plugin)
 end

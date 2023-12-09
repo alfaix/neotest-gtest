@@ -18,7 +18,6 @@ end
 ---@param _root_dir string
 ---@return neotest-gtest.ExecutablesRegistry
 function GlobalExecutableRegistry:for_dir(_root_dir)
-  vim.notify(_root_dir, vim.log.levels.INFO)
   local normalized = utils.normalize_path(_root_dir)
   if self._root2registry[normalized] == nil then
     self._root2registry[normalized] = ExecutablesRegistry:new(normalized)
@@ -36,6 +35,11 @@ function GlobalExecutableRegistry:list_executables(root_dirs)
     end
   end
   return vim.tbl_keys(executables)
+end
+
+---intended for tests only
+function GlobalExecutableRegistry:clear()
+  self._root2registry = {}
 end
 
 local globalRegistry = GlobalExecutableRegistry:new()

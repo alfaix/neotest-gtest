@@ -1,3 +1,4 @@
+local nio = require("nio")
 local scandir = require("plenary.scandir")
 local config = require("neotest-gtest.config")
 local Path = require("plenary.path")
@@ -45,7 +46,8 @@ end
 ---@return neotest-gtest.mtime? mtime table for the file at `path`
 ---@return string? error message if an error occurred
 function M.getmtime(path)
-  local stat, e = vim.loop.fs_stat(path)
+  -- local stat, e = nio.uv.fs_stat(path)
+  local e, stat = nio.uv.fs_stat(path)
   if e then
     return nil, e
   end
@@ -55,18 +57,17 @@ end
 
 ---Check if a file at path `path` exists and is a regular file.
 ---@param path string The path to check
----@return boolean whether the path leads to a regular file
----@return string|nil human-readable error message if the path is not a regular file
+---@return boolean exists whether the path leads to a regular file
 function M.fexists(path)
-  local stat, e = vim.loop.fs_stat(path)
+  local e, stat = nio.uv.fs_stat(path)
   if e then
-    return false, e
+    return false
   end
   assert(stat, "stat must be non-nil if there is no error")
   if stat.type == "file" then
-    return true, nil
+    return true
   end
-  return false, string.format("Expected regular file, found %s instead", stat.type)
+  return false
 end
 
 ---Normalizes the path. This ensures that all paths pointing to the same file
@@ -79,7 +80,7 @@ end
 ---@return string string the normalized path string
 function M.normalize_path(path)
   if path:sub(1, 1) == "~" and (path:sub(2, 2) == Path.path.sep or #path == 1) then
-    path = vim.loop.os_getenv("HOME") .. path:sub(2)
+    path = os.getenv("HOME") .. path:sub(2)
   end
   if #path ~= 1 and vim.endswith(path, Path.path.sep) then
     path = path:sub(1, -2)
@@ -146,7 +147,7 @@ end
 
 local function symlink(path, new_path)
   if not IS_WINDOWS then
-    vim.loop.fs_symlink(path, new_path)
+    nio.uv.fs_symlink(path, new_path)
   end
   -- otherwise just don't bother: only used for user's convenience
 end
@@ -223,17 +224,6 @@ function M.tbl_copy(t)
     t2[k] = v
   end
   return t2
-end
-
-function M.position2root(position)
-  local delimeter_index = string.find(position, "::")
-  local path
-  if delimeter_index == nil then
-    path = position
-  else
-    path = string.sub(position, 1, delimeter_index - 1)
-  end
-  return M.normalized_root(path)
 end
 
 function M.normalized_root(path)

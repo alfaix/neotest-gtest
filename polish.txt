@@ -1,0 +1,4 @@
+1. On run, list do --gtest_list_executables and abort if some selected ones are not parse-able by the exe
+2. Fix the root bug (if a subdirectory is a root, then there's a conflict with the parent root)
+3. Write integration tests. Don't be lazy. It is clear that the current tests are not enough.
+4. For finding root: can do client:get_position(nil, {adapter_id= adapter_id})

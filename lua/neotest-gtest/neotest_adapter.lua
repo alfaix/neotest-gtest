@@ -1,3 +1,4 @@
+local lib = require("neotest.lib")
 local executables = require("neotest-gtest.executables")
 local utils = require("neotest-gtest.utils")
 local config = require("neotest-gtest.config")
@@ -23,25 +24,61 @@ local function get_filter_for_test_node(node)
   end
 end
 
----Creates Google Test filters for the given nodes
----@param node neotest.Tree position to create a filter to
----@return string | string[] filters String or potentially nested list of strings.
----        Flatten to get the filters that gtest executable expects.
-local function get_filters_for_node(node)
-  local data = node:data()
-  local type = data.type
-
-  if type == "test" then
-    return get_filter_for_test_node(node)
-  elseif type == "namespace" then
-    return data.name .. ".*"
-  elseif type == "file" or type == "dir" then
-    return vim.tbl_map(function(child)
-      return get_filters_for_node(child)
-    end, node:children())
-  else
-    error("unknown node type " .. type)
+local function get_filters_for_nodes(nodes)
+  local function node2filter(node)
+    local type = node:data().type
+    if type == "test" then
+      return get_filter_for_test_node(node)
+    elseif type == "namespace" then
+      return node:data().name .. ".*"
+    else
+      error("unknown node type " .. type)
+    end
   end
+  return vim.tbl_map(node2filter, nodes)
+end
+
+---@param nodes neotest.Tree[]
+---@return neotest.Tree[]
+local flatten_nodes = function(nodes)
+  local result = {}
+  local function recurse(node)
+    if type(node) == "table" then
+      if node[1] ~= nil then
+        for _, child in ipairs(node) do
+          recurse(child)
+        end
+      elseif not vim.tbl_isempty(node) then
+        result[#result + 1] = node
+      end
+    else
+      result[#result + 1] = node
+    end
+  end
+  recurse(nodes)
+  return result
+end
+
+---Returns a list of nodes which can be filtered by (i.e., namespaces and tests)
+---@param nodes neotest.Tree[] position to create a filter to. Assumed to be
+---non-overlapping
+---@return neotest.Tree | neotest.Tree[] filters
+local function get_filterable_nodes(nodes)
+  local function recurse(node)
+    local data = node:data()
+    local type = data.type
+
+    if type == "file" or type == "dir" then
+      return vim.tbl_map(function(child)
+        return recurse(child)
+      end, node:children())
+    elseif type == "test" or type == "namespace" then
+      return node
+    else
+      error("unknown node type " .. type)
+    end
+  end
+  return flatten_nodes(vim.tbl_map(recurse, nodes))
 end
 
 local last_notified = 0
@@ -49,20 +86,19 @@ local last_notified = 0
 ---Notifies the user that the given nodes they tried to test are not mapped to
 ---executables and require configuration.
 ---@param node_names string[]
-local function notify_nodes_missing_executables(node_names)
+local function _raise_nodes_missing_executables(node_names)
   local now = os.time()
   if now - last_notified < 2 then
     return
   end
   last_notified = now
-  vim.notify(
+  error(
     string.format(
       "Some nodes do not have a corresponding GTest executable set. Please "
-        .. "configure them by mraking them and then running :ConfigureGtest "
+        .. "configure them by marking them and then running :ConfigureGtest "
         .. "in the summary window. Nodes: %s",
       table.concat(node_names, ", ")
-    ),
-    vim.log.levels.ERROR
+    )
   )
 end
 
@@ -93,27 +129,22 @@ end
 ---@return neotest.RunSpec[]|nil
 function NeotestAdapter:build_specs()
   local executable2nodes = self:_try_group_nodes_by_executable()
-  if not executable2nodes then
-    return nil
-  end
 
   local specs = {}
   for executable, nodes in pairs(executable2nodes) do
-    local filters = self:_build_filters_for_nodes(nodes)
-    local spec = self:_build_spec_for_executable(executable, filters)
+    local spec = self:_build_spec_for_executable(executable, nodes)
     specs[#specs + 1] = spec
   end
   return specs
 end
 
----@return table<string, neotest.Tree>|nil executable2nodes
+---@return table<string, neotest.Tree> executable2nodes
 ---@private
 function NeotestAdapter:_try_group_nodes_by_executable()
   local exe2node_ids, missing = executables.find_executables(self._tree)
   if exe2node_ids == nil then
     assert(missing, "find_executables must return nil if ok == false")
-    notify_nodes_missing_executables(missing)
-    return nil
+    _raise_nodes_missing_executables(missing)
   end
   assert(exe2node_ids, "find_executables must not return nil if ok == true")
 
@@ -132,23 +163,16 @@ function NeotestAdapter:_get_nodes_by_ids(node_ids)
   end, node_ids)
 end
 
----@param nodes neotest.Tree[]
----@return string[] filters
----@private
-function NeotestAdapter:_build_filters_for_nodes(nodes)
-  return vim.tbl_flatten(vim.tbl_map(function(node)
-    return get_filters_for_node(node)
-  end, nodes))
-end
-
 ---@param executable string
----@param filters string[]
+---@param nodes neotest.Tree[]
 ---@return neotest.RunSpec
 ---@private
-function NeotestAdapter:_build_spec_for_executable(executable, filters)
+function NeotestAdapter:_build_spec_for_executable(executable, nodes)
+  nodes = get_filterable_nodes(nodes)
+  local filters = get_filters_for_nodes(nodes)
   local results_path = utils.new_results_dir({
     history_size = config.history_size,
-  }) .. "test_result_" .. self._output_counter .. ".json"
+  }) .. "/test_result_" .. self._output_counter .. ".json"
 
   local command = vim.tbl_flatten({
     executable,
@@ -162,7 +186,12 @@ function NeotestAdapter:_build_spec_for_executable(executable, filters)
 
   return {
     command = command,
-    context = { results_path = results_path },
+    context = {
+      results_path = results_path,
+      positions = vim.tbl_map(function(x)
+        return x:data().id
+      end, nodes),
+    },
     strategy = self:_make_strategy_for_command(command),
   }
 end

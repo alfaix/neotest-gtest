@@ -220,7 +220,56 @@ function ReportConverter:make_neotest_results()
       results[report:position_id()] = report:to_neotest_report(self._result.output)
     end
   end
+  self:_notify_if_incomplete_results(results)
   return results
+end
+
+function ReportConverter:_notify_if_incomplete_results(results)
+  local missing = self:_collect_missing_nodes(results)
+  -- TODO printed if we run 2 executables for each one - must aggregate somehow
+  -- or filter for things only inside spec
+  if #missing > 0 then
+    local message = string.format(
+      [[Gtest executable %s did not produce results for the following tests: %s. 
+      Most likely, the executable for these nodes is not configured correctly.]],
+      self._spec.command[1],
+      table.concat(missing, ", ")
+    )
+    vim.notify(message, vim.log.levels.WARN)
+  end
+end
+
+local function is_leaf_id(id)
+  return id:match("%:%:.*%:%:") ~= nil
+end
+
+local function is_namespace_id(id)
+  return id:match("^[^:]+%:%:[^:]+$") ~= nil
+end
+
+local function extract_namespace(id)
+  return id:match("^[^:]+%:%:([^:]*)%:%:[^:]+$")
+end
+
+function ReportConverter:_collect_missing_nodes(results)
+  local missing = {}
+  local namespaces = {}
+  for node_id, _ in pairs(results) do
+    namespaces[extract_namespace(node_id)] = true
+  end
+
+  for _, node_id in ipairs(self._spec.context.positions) do
+    if is_leaf_id(node_id) and results[node_id] == nil then
+      missing[#missing + 1] = node_id
+    elseif is_namespace_id(node_id) then
+      -- fname::NamespaceId
+      local namespace_name = vim.split(node_id, "::")[2]
+      if not namespaces[namespace_name] then
+        missing[#missing + 1] = node_id
+      end
+    end
+  end
+  return missing
 end
 
 ---@private
@@ -231,22 +280,31 @@ function ReportConverter:_read_gtest_json()
       return vim.json.decode(data) or { testsuites = {} }
     end)
   end
-
   if not success then
-    error(
-      string.format(
-        [[Gtest executable failed to produce a result. Command: %s, exit code: %d, output at: %s\n
-            Please make sure any additional arguments supplied are correct and check the output for additional info.]],
-        table.concat(self._spec.command, " "),
-        self._result.code,
-        self._result.output
-      )
-    )
+    self:_raise_gtest_failed()
   end
 
   return data
 end
 
+function ReportConverter:_raise_gtest_failed()
+  local executable = self._spec.command[1]
+  local message
+  if utils.fexists(executable) then
+    message = string.format(
+      [[Gtest executable failed to produce a result. Command: %s, exit code: %d, output at: %s\n
+            Please make sure any additional arguments supplied are correct and check the output for additional info.]],
+      table.concat(self._spec.command, " "),
+      self._result.code,
+      self._result.output
+    )
+  else
+    message = string.format([[Gtest executable at path %s not found.]], executable)
+  end
+  error(message)
+end
+
+--TODO: bad name? "converting" spec/result/tree into reports is kind of unintuitive
 Report.converter = ReportConverter
 
 return Report

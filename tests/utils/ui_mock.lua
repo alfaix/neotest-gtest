@@ -1,3 +1,4 @@
+local lib = require("neotest.lib")
 local assert = require("luassert")
 local nio = require("nio")
 local neotest = require("neotest")
@@ -126,11 +127,11 @@ function SelectMock:new()
   }
   setmetatable(o, { __index = self })
   ---@diagnostic disable-next-line: duplicate-set-field
-  vim.fn.select = function(...)
+  vim.ui.select = function(...)
     return o:select(...)
   end
   ---@diagnostic disable-next-line: duplicate-set-field
-  nio.ui.select = nio.tasks.wrap(vim.fn.select, 3)
+  nio.ui.select = nio.tasks.wrap(vim.ui.select, 3)
   return o
 end
 
@@ -151,15 +152,72 @@ end
 function SelectMock:select(choices, opts, callback)
   self._choices = choices
   self._opts = opts
-  if self._select_value ~= nil then
-    assert.is_true(vim.tbl_contains(choices, self._select_value))
+  if self._select_value == nil then
+    callback(nil, nil)
+  else
+    local index
+    for i, choice in ipairs(choices) do
+      if choice == self._select_value then
+        index = i
+        break
+      end
+    end
+    assert.is_not_nil(index)
+    callback(self._select_value, index)
   end
-  callback(self._select_value)
 end
 
 function SelectMock:revert()
-  vim.fn.select = self._sync_select
+  vim.ui.select = self._sync_select
   nio.ui.select = self._async_select
+end
+
+---@class neotest-gtest.tests.NotificationsMock
+---@field private _notifications table[]
+---@field private _old_vim_notify fun(...)
+---@field private _old_lib_notify fun(...)
+---@field private _asserted_notifications integer
+local NotificationsMock = {}
+
+function NotificationsMock:new()
+  local obj = {
+    _notifications = {},
+    _old_vim_notify = vim.notify,
+    _old_lib_notify = lib.notify,
+    _asserted_notifications = 0,
+  }
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.notify = function(message, level)
+    table.insert(obj._notifications, { message = message, level = level })
+  end
+  lib.notify = vim.notify
+  setmetatable(obj, { __index = self })
+  return obj
+end
+
+function NotificationsMock:assert_no_other_notifications()
+  if #self._notifications > self._asserted_notifications then
+    error(string.format("Unexpected notifications: %s", vim.inspect(self._notifications)))
+  end
+end
+
+function NotificationsMock:assert_notified(message, level)
+  for _, notification in ipairs(self._notifications) do
+    if string.find(notification.message, message, 1, true) then
+      if type(notification.level) == "string" then
+        notification.level = vim.log.levels[string.upper(notification.level)]
+      end
+      assert.are.equal(level, notification.level)
+      self._asserted_notifications = self._asserted_notifications + 1
+      return
+    end
+  end
+  error(string.format("Notification not found: %s, %s", message, vim.inspect(self._notifications)))
+end
+
+function NotificationsMock:revert()
+  vim.notify = self._old_vim_notify
+  lib.notify = self._old_lib_notify
 end
 
 local M = {}
@@ -168,34 +226,43 @@ local components_map = {
   select = SelectMock,
   input = InputMock,
   marks = MarksMock,
+  notifications = NotificationsMock,
 }
 
 ---@class neotest-gtest.tests.MockUi
----@field private _components string[]
 ---@field public select neotest-gtest.tests.SelectMock
 ---@field public input neotest-gtest.tests.InputMock
 ---@field public marks neotest-gtest.tests.MarksMock
+---@field public notifications neotest-gtest.tests.NotificationsMock
 local MockUi = {}
 
-function MockUi:new(components)
-  components = components or { "select", "input", "marks" }
-  local obj = { _components = components }
-  for _, component in ipairs(components) do
-    obj[component] = components_map[component]:new()
+function MockUi:new(project_root)
+  local obj = {}
+  for component, cls in pairs(components_map) do
+    obj[component] = cls:new()
   end
   setmetatable(obj, { __index = self })
   return obj
 end
 
 function MockUi:revert()
-  for _, component in ipairs(self._components) do
+  for component, _ in pairs(components_map) do
     self[component]:revert()
   end
 end
 
+function MockUi:reset()
+  for component, _ in pairs(components_map) do
+    self[component]:revert()
+  end
+  for component, _ in pairs(components_map) do
+    self[component] = components_map[component]:new()
+  end
+end
+
 ---@return neotest-gtest.tests.MockUi
-function M.mock_ui(components)
-  return MockUi:new(components)
+function M.mock_ui()
+  return MockUi:new()
 end
 
 return M

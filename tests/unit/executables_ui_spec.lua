@@ -4,19 +4,18 @@ local it = nio.tests.it
 
 local executables_ui = require("neotest-gtest.executables.ui")
 local ui_mock = require("tests.utils.ui_mock")
+local function configure_executable()
+  executables_ui.configure_executable().wait()
+end
 
 describe("test executables_ui with single root dir", function()
   ---@type neotest-gtest.MockProject
   local project
   ---@type neotest-gtest.tests.MockUi
-  local ui
-
-  before_each(function()
-    ui = ui_mock.mock_ui()
-  end)
+  local ui = ui_mock.mock_ui()
 
   after_each(function()
-    ui:revert()
+    ui:reset()
   end)
 
   local function with_marked_items(items)
@@ -40,7 +39,7 @@ describe("test executables_ui with single root dir", function()
     with_marked_items({ "test_one.cpp::TestOne" })
     ui.input:return_value("/path/to/some/executable")
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.input:assert_path_requested()
     project:assert_configured("test_one.cpp::TestOne", "/path/to/some/executable")
@@ -53,7 +52,7 @@ describe("test executables_ui with single root dir", function()
     ui.select:return_option("/path/to/exe1")
     with_marked_items({ "test_one.cpp::TestOne" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.select:assert_called_with_choices({ "/path/to/exe1", "Enter path..." })
     project:assert_configured("test_one.cpp::TestOne", "/path/to/exe1")
@@ -67,7 +66,7 @@ describe("test executables_ui with single root dir", function()
     ui.input:return_value("/path/to/exe2")
     with_marked_items({ "test_two.cpp::TestTwo" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.select:assert_called_with_choices({ "/path/to/exe1", "Enter path..." })
     ui.input:assert_path_requested()
@@ -80,7 +79,7 @@ describe("test executables_ui with single root dir", function()
     ui.select:return_option(nil)
     with_marked_items({ "test_two.cpp::TestTwo" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.select:assert_called_with_choices({ "/path/to/exe1", "Enter path..." })
     project:assert_not_configured("test_two.cpp::TestTwo")
@@ -92,7 +91,7 @@ describe("test executables_ui with single root dir", function()
     ui.input:return_value(nil)
     with_marked_items({ "test_one.cpp::TestOne" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.input:assert_path_requested()
     project:assert_not_configured("test_one.cpp::TestOne")
@@ -106,7 +105,7 @@ describe("test executables_ui with single root dir", function()
     ui.input:return_value(nil)
     with_marked_items({ "test_two.cpp::TestTwo" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.select:assert_called_with_choices({ "/path/to/exe1", "Enter path..." })
     ui.input:assert_path_requested()
@@ -121,7 +120,7 @@ describe("test executables_ui with single root dir", function()
     ui.input:return_value("/path/to/exe2")
     with_marked_items({ "test_one.cpp::TestOne", "test_one.cpp::TestOne::TestFoo" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.input:assert_path_requested_with_default("/path/to/exe1")
   end)
@@ -136,7 +135,7 @@ describe("test executables_ui with single root dir", function()
     ui.input:return_value("/path/to/exe3")
     with_marked_items({ "test_one.cpp::TestOne", "test_two.cpp::TestTwo" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     ui.input:assert_path_requested()
   end)
@@ -177,7 +176,7 @@ describe("test executables_ui with single root dir", function()
     ui.input:return_value("/path/to/exe1")
     with_marked_items({ "test_one.cpp::TestOne" }, { "test_two.cpp::TestTwo" })
 
-    executables_ui.configure_executable()
+    configure_executable()
 
     project1:assert_configured("test_one.cpp::TestOne", "/path/to/exe1")
     project2:assert_configured("test_two.cpp::TestTwo", "/path/to/exe1")

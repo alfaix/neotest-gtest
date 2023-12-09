@@ -78,6 +78,7 @@ local function add_files_to_tree(tree, test_files)
   return tree
 end
 
+---@param fname2content table<string, string>
 function MockProject:set_contents(fname2content)
   fname2content = fname2content or {}
   -- create a root marker

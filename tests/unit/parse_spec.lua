@@ -38,6 +38,55 @@ describe("config library", function()
     )
   end)
 
+  it("correctly parses comment after last parameter", function()
+    assert_parses_as(
+      [[
+      TEST(TestFoo, Bar /* aha! */) {
+        doFoo();
+      }
+      ]],
+      {
+        {
+          name = "TestFoo",
+          line_range = { 0, 2 },
+        },
+      }
+    )
+  end)
+
+  it("correctly parses comment before first parameter", function()
+    assert_parses_as(
+      [[
+      TEST( // aha!
+      TestFoo, Bar) {
+        doFoo();
+      }
+      ]],
+      {
+        {
+          name = "TestFoo",
+          line_range = { 0, 3 },
+        },
+      }
+    )
+  end)
+  it("correctly parses comment between parameters", function()
+    assert_parses_as(
+      [[
+      TEST(TestFoo, // aha!
+      Bar) {
+        doFoo();
+      }
+      ]],
+      {
+        {
+          name = "TestFoo",
+          line_range = { 0, 3 },
+        },
+      }
+    )
+  end)
+
   it("correctly separates two namespaces", function()
     assert_parses_as(
       [[

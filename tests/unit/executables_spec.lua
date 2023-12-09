@@ -3,7 +3,6 @@ local it = require("nio.tests").it
 
 local ExecutablesRegistry = require("neotest-gtest.executables.registry")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
-local executables_module = require("neotest-gtest.executables")
 local tree_utils = require("tests.utils.tree")
 local utils = require("neotest-gtest.utils")
 

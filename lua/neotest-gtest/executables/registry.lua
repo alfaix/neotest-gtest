@@ -54,16 +54,6 @@ function ExecutablesRegistry:new(normalized_root_dir)
   return registry
 end
 
-function ExecutablesRegistry:_reload_tree()
-  local adapter_id = ADAPTER_PREFIX .. self._root_dir
-  local tree = neotest.state.positions(adapter_id)
-  -- lib.files.write("/home/alfaix/huuuh", vim.inspect(neotest.state.TRACKER.adapter_states))
-  if tree == nil then
-    error("tree with root " .. self._root_dir .. " not found")
-  end
-  self._tree = tree
-end
-
 ---@return string[]
 function ExecutablesRegistry:list_executables()
   local executables = vim.tbl_values(self._node2executable)
@@ -81,6 +71,15 @@ function ExecutablesRegistry:find_executables(id)
   end
 
   return self:_group_children_by_executable(id)
+end
+
+function ExecutablesRegistry:_reload_tree()
+  local adapter_id = ADAPTER_PREFIX .. self._root_dir
+  local tree = neotest.state.positions(adapter_id)
+  if tree == nil then
+    error("tree with root " .. self._root_dir .. " not found")
+  end
+  self._tree = tree
 end
 
 function ExecutablesRegistry:_lookup_ancestor_executable(id)

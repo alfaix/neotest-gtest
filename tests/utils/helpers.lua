@@ -1,4 +1,4 @@
-local utils = require("neotest-gtest.utils")
+local assert = require("luassert")
 local nio = require("nio")
 local lib = require("neotest.lib")
 local M = {}
@@ -31,23 +31,19 @@ end
 function M.dedent(str)
   local lines = vim.split(str, "\n", { plain = true })
   local indent = string.find(lines[1], "%S")
+  if indent == nil then
+    return str
+  end
   for i, line in ipairs(lines) do
     lines[i] = line:sub(indent)
   end
   return vim.trim(table.concat(lines, "\n"))
 end
 
-local pattern = "/tmp/XXXXXX"
-
---NB: can't call vim.fn.tempname because of E5560 (VimL functions can't be
---called in lua coroutines)
 ---@return string
 function M.mktempdir()
-  local err, path = nio.uv.fs_mkdtemp(pattern)
-  if err ~= nil then
-    error(err)
-  end
-  assert(path, "path must be non-nil if there is no error")
+  local path = assert(nio.fn.tempname())
+  nio.uv.fs_mkdir(path, tonumber("0700", 8))
   return path
 end
 
@@ -79,6 +75,16 @@ function M.mkdir(path, opts)
   if err ~= nil and not (opts.exist_ok and vim.startswith(err, "EEXIST")) then
     error(err)
   end
+end
+
+function M.assert_same_keys(table1, table2)
+  return M.assert_same_ignore_order(vim.tbl_keys(table1), vim.tbl_keys(table2))
+end
+
+function M.assert_same_ignore_order(list1, list2, comp)
+  table.sort(list1, comp)
+  table.sort(list2, comp)
+  assert.are_same(list1, list2)
 end
 
 return M
