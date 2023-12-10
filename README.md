@@ -123,6 +123,10 @@ require("neotest-gtest").setup({
       bold = "\27[1m",
     },
   },
+  -- What extra args should ALWAYS be sent to google test?
+  -- if you want to send them for one given invocation only,
+  -- send them to `neotest.run({extra_args = ...})`
+  -- see :h neotest.RunArgs for details
   extra_args = {},
   -- see :h neotest.Config.discovery. Best to keep this as-is and set
   -- per-project settings in neotest instead.
