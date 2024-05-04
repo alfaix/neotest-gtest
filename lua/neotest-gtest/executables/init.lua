@@ -25,7 +25,7 @@ function M.set_summary_autocmd()
     callback = function(ctx)
       local buf = ctx.buf
       nio.api.nvim_buf_create_user_command(buf, "ConfigureGtest", function()
-        M.configure_executable().wait()
+        M.configure_executable()
       end, {})
       if config.mappings.configure ~= nil then
         vim.api.nvim_buf_set_keymap(buf, "n", config.mappings.configure, "", {
