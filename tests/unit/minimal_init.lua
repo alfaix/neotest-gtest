@@ -1,6 +1,6 @@
 local lazypath = vim.fn.stdpath("data") .. "/lazy"
 
-local plugins = { "plenary.nvim", "nvim-dap", "nvim-treesitter", "neotest" }
+local plugins = { "plenary.nvim", "nvim-dap", "nvim-treesitter", "neotest", "nvim-nio" }
 
 vim.notify = print
 vim.opt.swapfile = false
