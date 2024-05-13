@@ -28,6 +28,7 @@ function InputMock:return_value(value)
 end
 
 function InputMock:input(opts, callback)
+  assert.is_false(vim.in_fast_event())
   self._opts = opts
   callback(self._input_value)
 end

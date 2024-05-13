@@ -111,6 +111,7 @@ function M._select_or_create_executable(choices, default)
 end
 
 function M._input_executable(default)
+  nio.scheduler()
   return nio.ui.input({
     prompt = "Enter path to executable:",
     completion = "file",
