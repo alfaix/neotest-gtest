@@ -24,15 +24,11 @@ function M.set_summary_autocmd()
     group = group,
     callback = function(ctx)
       local buf = ctx.buf
-      nio.api.nvim_buf_create_user_command(buf, "ConfigureGtest", function()
-        M.configure_executable()
-      end, {})
+      nio.api.nvim_buf_create_user_command(buf, "ConfigureGtest", M.configure_executable, {})
       if config.mappings.configure ~= nil then
         vim.api.nvim_buf_set_keymap(buf, "n", config.mappings.configure, "", {
           desc = "Select a Google Test executable for marked tests",
-          callback = function()
-            M.configure_executable().wait()
-          end,
+          callback = M.configure_executable,
         })
       end
     end,
