@@ -27,7 +27,12 @@ function M._configure_executable_async()
 end
 
 function M.configure_executable()
-  return nio.run(M._configure_executable_async, function() end)
+  return nio.run(M._configure_executable_async, function(ok, maybe_error)
+    if not ok then
+      assert(maybe_error, "success is false but error is not provided!")
+      error(maybe_error)
+    end
+  end)
 end
 
 function M._get_marked_root2positions()
