@@ -98,9 +98,7 @@ function M._select_or_create_executable(choices, default)
 
   local select_options = utils.tbl_copy(choices)
   select_options[#select_options + 1] = "Enter path..."
-  -- nio.ui.select is not schedule_wrapped, and we may be in a UV callback: wait for the scheduler
-  nio.scheduler()
-  local _, idx = nio.ui.select(select_options, { prompt = "Select executable for marked nodes:" })
+  local idx = M._select_executable(select_options)
   if idx == nil then
     return nil
   end
@@ -108,6 +106,12 @@ function M._select_or_create_executable(choices, default)
     return M._input_executable(default)
   end
   return select_options[idx]
+end
+
+function M._select_executable(options)
+  nio.scheduler()
+  local _, idx = nio.ui.select(options, { prompt = "Select executable for marked nodes:" })
+  return idx
 end
 
 function M._input_executable(default)
