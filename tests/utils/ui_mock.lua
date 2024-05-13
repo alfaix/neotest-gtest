@@ -151,7 +151,7 @@ function SelectMock:assert_called_with_choices(choices)
 end
 
 function SelectMock:select(choices, opts, callback)
-  assert(vim.in_fast_event())
+  assert.is_false(vim.in_fast_event())
   self._choices = choices
   self._opts = opts
   if self._select_value == nil then
