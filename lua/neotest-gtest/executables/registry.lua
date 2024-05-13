@@ -77,7 +77,7 @@ function ExecutablesRegistry:_reload_tree()
   local adapter_id = ADAPTER_PREFIX .. self._root_dir
   local tree = neotest.state.positions(adapter_id)
   if tree == nil then
-    error("tree with root " .. self._root_dir .. " not found")
+    utils.schedule_error("tree with root " .. self._root_dir .. " not found")
   end
   self._tree = tree
 end
@@ -133,7 +133,9 @@ function ExecutablesRegistry:_iter_children(node_id)
   -- TODO: keep a root tree cached
   local node = self._tree:get_key(node_id)
   if node == nil then
-    error(string.format("tree %s does not contain node_id %s", self._tree:data().id, node_id))
+    utils.schedule_error(
+      string.format("tree %s does not contain node_id %s", self._tree:data().id, node_id)
+    )
   end
   local children = node:children()
 

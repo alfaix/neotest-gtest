@@ -233,4 +233,15 @@ function M.normalized_root(path)
   end
 end
 
+function M.schedule_notify(msg, level, opts)
+  nio.scheduler()
+  vim.notify(msg, level, opts)
+end
+
+function M.schedule_error(message, level)
+  nio.scheduler()
+  -- can be overloaded by various plugins to call non-fast API (e.g., noice.nvim)
+  error(message, level)
+end
+
 return M

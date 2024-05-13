@@ -235,7 +235,7 @@ function ReportConverter:_notify_if_incomplete_results(results)
       self._spec.command[1],
       table.concat(missing, ", ")
     )
-    vim.notify(message, vim.log.levels.WARN)
+    utils.schedule_notify(message, vim.log.levels.WARN)
   end
 end
 
@@ -301,7 +301,7 @@ function ReportConverter:_raise_gtest_failed()
   else
     message = string.format([[Gtest executable at path %s not found.]], executable)
   end
-  error(message)
+  utils.schedule_error(message)
 end
 
 --TODO: bad name? "converting" spec/result/tree into reports is kind of unintuitive

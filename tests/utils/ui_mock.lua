@@ -190,6 +190,7 @@ function NotificationsMock:new()
   }
   ---@diagnostic disable-next-line: duplicate-set-field
   vim.notify = function(message, level)
+    assert.is_false(vim.in_fast_event(), message)
     table.insert(obj._notifications, { message = message, level = level })
   end
   lib.notify = vim.notify

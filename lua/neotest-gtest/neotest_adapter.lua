@@ -13,7 +13,7 @@ local function get_filter_for_test_node(node)
   if test_kind == "TEST_P" then
     -- TODO: figure this out (will have to query executables and do
     -- best-effort matching, probably)
-    error("TEST_P is not yet supported, sorry :(")
+    utils.schedule_error("TEST_P is not yet supported, sorry :(")
   else
     local parts = vim.split(posid, "::", { plain = true })
     -- file::namespace::test_name
@@ -32,7 +32,7 @@ local function get_filters_for_nodes(nodes)
     elseif type == "namespace" then
       return node:data().name .. ".*"
     else
-      error("unknown node type " .. type)
+      utils.schedule_error("unknown node type " .. type)
     end
   end
   return vim.tbl_map(node2filter, nodes)
@@ -75,7 +75,7 @@ local function get_filterable_nodes(nodes)
     elseif type == "test" or type == "namespace" then
       return node
     else
-      error("unknown node type " .. type)
+      utils.schedule_error("unknown node type " .. type)
     end
   end
   return flatten_nodes(vim.tbl_map(recurse, nodes))
@@ -92,7 +92,7 @@ local function _raise_nodes_missing_executables(node_names)
     return
   end
   last_notified = now
-  error(
+  utils.schedule_error(
     string.format(
       "Some nodes do not have a corresponding GTest executable set. Please "
         .. "configure them by marking them and then running :ConfigureGtest "

@@ -30,7 +30,7 @@ function M.configure_executable()
   return nio.run(M._configure_executable_async, function(ok, maybe_error)
     if not ok then
       assert(maybe_error, "success is false but error is not provided!")
-      error(maybe_error)
+      utils.schedule_error(maybe_error)
     end
   end)
 end
@@ -59,7 +59,7 @@ function M._check_something_is_marked(root2positions)
     end
   end
 
-  vim.notify(
+  utils.schedule_notify(
     "Please mark the relevant GTest files (or dirs) first and then call :ConfigureGtest",
     vim.log.levels.INFO
   )
