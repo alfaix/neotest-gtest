@@ -7,13 +7,15 @@ local controller = require("tests.utils.controller")
 local state
 local exe1
 local exe2
+local src_root
 
 local function setup()
   controller.setup()
   state = controller.state
 
-  exe1 = state.project_root .. "/tests/integration/cpp/build/test-executable"
-  exe2 = state.project_root .. "/tests/integration/cpp/build/test-executable2"
+  exe1 = state.cpp_root .. "/build/test-executable"
+  exe2 = state.cpp_root .. "/build/test-executable2"
+  src_root = state.cpp_root .. "src"
 end
 
 describe("integration testsuite", function()
@@ -61,7 +63,7 @@ describe("integration testsuite", function()
 
   it("configure wrong executable", function()
     setup()
-    local root_id = state.project_root
+    local root_id = state.cpp_root .. "/src"
     local id3 = state:mkid("subdirectory/test_three.cpp")
     state:configure_executables({ [exe1] = { root_id } })
     state:run({ args = { root_id } })
@@ -78,7 +80,7 @@ describe("with configured tree", function()
   local root_id, all_ids
   local function with_configured_tree()
     setup()
-    root_id = state.project_root
+    root_id = state.cpp_root .. "/src"
     all_ids = {
       state:mkid("subdirectory/test_three.cpp"),
       state:mkid("test_two.cpp"),

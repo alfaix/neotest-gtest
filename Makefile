@@ -11,8 +11,5 @@ unit-test:
 integration-test: submodules build-tests
 	nvim --headless -c "PlenaryBustedDirectory tests/integration {$PLENARY_OPTS}"
 
-submodules:
-	git submodule update --init --recursive
-
 build-tests: tests/integration/cpp
 	$(MAKE) -C tests/integration/cpp

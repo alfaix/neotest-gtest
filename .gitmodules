@@ -1,4 +1,0 @@
-[submodule "googletest"]
-	path = tests/integration/cpp/googletest
-	url = https://github.com/google/googletest
-	branch = main
