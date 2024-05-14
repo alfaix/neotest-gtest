@@ -2,8 +2,8 @@
 
 MINIMAL_INIT = tests/unit/minimal_init.lua
 PLENARY_OPTS = {minimal_init='${MINIMAL_INIT}', sequential=true, timeout=1000}
-GTEST_VERSION ?= main
-export GTEST_VERSION
+GTEST_TAG ?= main
+export GTEST_TAG
 
 test: unit-test integration-test ;
 
