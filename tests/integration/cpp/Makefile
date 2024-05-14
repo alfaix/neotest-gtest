@@ -1,7 +1,8 @@
-SHELL := /bin/bash
-pwd := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+GTEST_VERSION ?= main
 .PHONY: build
 
 build:
-	cmake -S$(pwd) -DGTEST_VERSION=main -B$(pwd)/build && \
-		cmake --build $(pwd)/build
+	cmake -S. -DGTEST_VERSION=$(GTEST_VERSION) -Bbuild && \
+		cmake --build build
+clean:
+	rm -rf build
