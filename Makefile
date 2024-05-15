@@ -10,6 +10,12 @@ test: unit-test integration-test ;
 unit-test:
 	nvim --headless -c "PlenaryBustedDirectory tests/unit ${PLENARY_OPTS}"
 
+integration-test-all:
+	@for gtest_tag in release-1.10.0 release-1.11.0 release-1.12.1 v1.13.0 v1.14.0 main; do \
+		echo "Running integration tests with gtest tag $$gtest_tag"; \
+		($(MAKE) clean-tests && $(MAKE) integration-test GTEST_TAG=$$gtest_tag) || exit 1; \
+	done
+
 integration-test: build-tests
 	nvim --headless -c "PlenaryBustedDirectory tests/integration ${PLENARY_OPTS}"
 
