@@ -9,10 +9,14 @@ add_executable(test-executable2 src/subdirectory/test_three.cpp)
 
 enable_testing()
 include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG ${GTEST_TAG})
+if($GTEST_PATH)
+  FetchContent_Declare(googletest SOURCE_DIR ${GTEST_PATH})
+else()
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG ${GTEST_TAG})
+endif()
 
 if(${GTEST_TAG} STREQUAL "main")
   set(GTEST_VERSION "999.999")

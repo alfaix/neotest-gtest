@@ -48,10 +48,18 @@ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
 ]]
 )
 
+local function add_reverse_lookup(tbl)
+  local keys = vim.tbl_keys(tbl)
+  for _, key in ipairs(keys) do
+    tbl[tbl[key]] = key
+  end
+  return tbl
+end
+
 ---Extracts test positions from a source using the given query
----@param query Query The query to use
+---@param query vim.treesitter.Query The query to use
 ---@param source string The text of the source file.
----@param root LanguageTree The root of the tree
+---@param root vim.treesitter.LanguageTree The root of the tree
 ---@return table
 ---@return table
 local function extract_captures(
@@ -67,9 +75,13 @@ local function extract_captures(
 
   local namespaces = {}
   local tests = {}
-  pcall(vim.tbl_add_reverse_lookup, query.captures)
+  add_reverse_lookup(query.captures)
   local gettext = function(match, capture_name)
-    return vim.treesitter.get_node_text(match[query.captures[capture_name]], source)
+    local node = match[query.captures[capture_name]]
+    if node == nil then
+      error(vim.inspect({ node, match, query.captures, capture_name }))
+    end
+    return vim.treesitter.get_node_text(node, source)
   end
 
   for _, match in query:iter_matches(root, source) do
