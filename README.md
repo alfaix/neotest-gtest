@@ -1,9 +1,18 @@
 # neotest-gtest
+![CI status](https://github.com/alfaix/neotest-gtest/actions/workflows/workflow.yaml/badge.svg?event=push)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 This is a [neotest] adapter for [Google Test][google-test], a popular C++ testing
 library. It allows easy interactions with tests from your neovim.
 It should work well out-of-the-box for most cases, though some features (see below)
 are not yet supported.
+
+## Requirements
+* Neovim 0.9.1+, 0.10.x, or nightly.
+* [Google Test][google-test] 1.10+
+* [neotest] (latest, incl. nvim-nio and plenary.nvim)
+* [nvim-treesitter] (latest, with CPP parser installed via `TSInstall cpp`)
+* [nvim-dap] (latest, _optional_, required for debugging)
 
 ## Features
 
@@ -150,6 +159,7 @@ download googletests as a submodule.
 
 MIT, see [LICENSE](https://github.com/alfaix/neotest-gtest/blob/main/LICENSE)
 
+[nvim-treesitter]: https://github.com/nvim-treesitter/nvim-treesitter
 [neotest]: https://github.com/nvim-neotest/neotest
 [google-test]: https://github.com/google/googletest
 [nvim-dap]: https://github.com/mfussenegger/nvim-dap
