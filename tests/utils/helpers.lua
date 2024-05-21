@@ -55,6 +55,13 @@ local function parent_dir(path)
   return string.sub(path, 1, sep_index - 1)
 end
 
+local function writefile(path, contents)
+  local fd = assert(nio.uv.fs_open(path, "w", tonumber("0600", 8)))
+  assert(nio.uv.fs_write(fd, contents, -1))
+  assert(nio.uv.fs_fsync(fd))
+  assert(nio.uv.fs_close(fd))
+end
+
 function M.write_file_tree(root, relpath2contents)
   M.mkdir(root)
   local created = { [root] = true }
@@ -65,7 +72,7 @@ function M.write_file_tree(root, relpath2contents)
       created[parent] = true
     end
     local abspath = string.format("%s%s%s", root, lib.files.sep, relpath)
-    lib.files.write(abspath, contents)
+    writefile(abspath, contents)
   end
 end
 
