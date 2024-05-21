@@ -26,6 +26,7 @@ local make_gtest_report = function(spec)
 end
 
 local function tree_with_data(id, data)
+  data.id = id
   return {
     get_key = function(_self, _id)
       assert.are.same(id, _id)
@@ -66,14 +67,13 @@ describe("report", function()
   local function creates_report(spec)
     spec.name = "TestFoo"
     spec.namespace = "TestOne"
-    local report = Report:new(test_result, tree)
+    local report = Report:new(test_result, tree:get_key("/test_one.cpp::TestOne::TestFoo"))
     assert_report_matches_spec(report, spec)
   end
 
   it("successful test produces a successful report", function()
     with_result({ name = "TestFoo" })
-    local report = Report:new(test_result, tree)
-    assert_report_matches_spec(report, {
+    creates_report({
       name = "TestFoo",
       namespace = "TestOne",
       status = "passed",
@@ -267,11 +267,19 @@ describe("report builder", function()
     }
     opts = vim.tbl_extend("force", default_opts, opts or {})
 
-    local converter = Report.converter:new(
-      { command = opts.command, context = { results_path = opts.results_path, positions = {} } },
-      { code = opts.code, output = opts.output },
-      tree
-    )
+    local converter = Report.converter:new({
+      command = opts.command,
+      context = {
+        results_path = opts.results_path,
+        positions = {},
+        name2path = {
+          ["TestOne"] = dirpath .. "/test_one.cpp",
+          ["TestOne.Foo"] = dirpath .. "/test_one.cpp",
+          ["TestTwo"] = dirpath .. "/test_two.cpp",
+          ["TestTwo.Bar"] = dirpath .. "/test_two.cpp",
+        },
+      },
+    }, { code = opts.code, output = opts.output }, tree)
     local ok, message_or_results = pcall(function()
       return converter:make_neotest_results()
     end)

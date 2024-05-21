@@ -46,7 +46,7 @@ local function filter2testnames(filters)
     if test_name == "*" then
       positions[#positions + 1] = namespace
     else
-      positions[#positions + 1] = namespace .. "::" .. test_name
+      positions[#positions + 1] = namespace .. "." .. test_name
     end
   end
   return positions
@@ -163,37 +163,35 @@ function AdapterResultSpec:_check_context_matches_command(context, command)
   local gtest_output = args["gtest_output"]
   local results_path = gtest_output:match("^json:(.*)$")
   local filter_arg = args["gtest_filter"]
-  local expected_positions = self:_filter_arg2positions(filter_arg)
+  local expected_name2path = self:_get_name2path(filter_arg)
 
   assert.is_not_nil(results_path)
-  assert.is_not_nil(context.positions)
-  table.sort(context.positions)
-  table.sort(expected_positions)
-  assert.are.same({ results_path = results_path, positions = expected_positions }, context)
+  assert.is_not_nil(context.name2path)
+  assert.are.same({ results_path = results_path, name2path = expected_name2path }, context)
 end
 
-function AdapterResultSpec:_filter_arg2positions(filters)
+function AdapterResultSpec:_get_name2path(filters)
   filters = vim.split(filters, ":", { plain = true })
   local testnames = filter2testnames(filters)
-  local testnames2positions = self:_get_testnames2positions()
-  local positions = {}
+  local all_name2path = self:_get_all_name2path()
+  local name2path = {}
   for _, testname in ipairs(testnames) do
-    assert.is_not_nil(testnames2positions[testname])
-    positions[#positions + 1] = testnames2positions[testname]
+    assert.is_not_nil(all_name2path[testname])
+    name2path[testname] = all_name2path[testname]
   end
-  return positions
+  return name2path
 end
 
-function AdapterResultSpec:_get_testnames2positions()
+function AdapterResultSpec:_get_all_name2path()
   local testnames2positions = {}
   for _, file in ipairs(self._project:get_tree():children()) do
     local filepath = file:data().id
     for _, namespace in ipairs(file:children()) do
       local ns_name = namespace:data().name
-      testnames2positions[ns_name] = filepath .. "::" .. ns_name
+      testnames2positions[ns_name] = filepath
       for _, test in ipairs(namespace:children()) do
-        local full_id = ns_name .. "::" .. test:data().name
-        testnames2positions[full_id] = filepath .. "::" .. full_id
+        local full_id = ns_name .. "." .. test:data().name
+        testnames2positions[full_id] = filepath
       end
     end
   end

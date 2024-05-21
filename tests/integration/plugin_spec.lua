@@ -7,13 +7,23 @@ local controller = require("tests.utils.controller")
 local state
 local exe1
 local exe2
+local root_id
 
 local function setup()
   controller.setup()
   state = controller.state
 
-  exe1 = state.project_root .. "/tests/integration/cpp/build/test-executable"
-  exe2 = state.project_root .. "/tests/integration/cpp/build/test-executable2"
+  exe1 = state.cpp_root .. "/build/test-executable"
+  exe2 = state.cpp_root .. "/build/test-executable2"
+  root_id = state.cpp_root .. "/src"
+end
+
+local function assert_notified_id_not_found(id)
+  state.ui.notifications:assert_notified(
+    "did not produce results for the following tests: " .. id,
+    vim.log.levels.WARN
+  )
+  state.ui.notifications:assert_no_other_notifications()
 end
 
 describe("integration testsuite", function()
@@ -59,18 +69,20 @@ describe("integration testsuite", function()
     state.ui.notifications:assert_no_other_notifications()
   end)
 
-  it("configure wrong executable", function()
+  it("configure wrong executable (namespace)", function()
     setup()
-    local root_id = state.project_root
-    local id3 = state:mkid("subdirectory/test_three.cpp")
     state:configure_executables({ [exe1] = { root_id } })
     state:run({ args = { root_id } })
     state:assert_results_published({ state:mkid("test_one.cpp"), state:mkid("test_two.cpp") })
-    state.ui.notifications:assert_notified(
-      "did not produce results for the following tests: " .. id3,
-      vim.log.levels.WARN
-    )
-    state.ui.notifications:assert_no_other_notifications()
+    assert_notified_id_not_found(state:mkid("subdirectory/test_three.cpp"))
+  end)
+
+  it("configure wrong executable (specific test)", function()
+    setup()
+    state:configure_executables({ [exe1] = { root_id } })
+    local id = state:mkid("subdirectory/test_three.cpp", "TestThree", "TestOk")
+    state:run({ args = { id } })
+    assert_notified_id_not_found(id)
   end)
 end)
 
@@ -78,7 +90,7 @@ describe("with configured tree", function()
   local root_id, all_ids
   local function with_configured_tree()
     setup()
-    root_id = state.project_root
+    root_id = state.cpp_root .. "/src"
     all_ids = {
       state:mkid("subdirectory/test_three.cpp"),
       state:mkid("test_two.cpp"),

@@ -28,10 +28,11 @@ function TestsController:new()
   local state = {
     project_root = Path:new(integration_tests_path()):parent().filename,
     ui = ui_mock.mock_ui(),
+    _results_recorder = recorders.results:new(),
+    _specs_recorder = recorders.specs:new(),
   }
+  state.cpp_root = state.project_root .. "/tests/integration/cpp"
   state.adapter_id = "neotest-gtest:" .. state.project_root
-  state._results_recorder = recorders.results:new()
-  state._specs_recorder = recorders.specs:new()
   setmetatable(state, { __index = self })
   return state
 end
@@ -125,11 +126,9 @@ function TestsController:_configure_one_executable(exe, nodes)
 end
 
 function TestsController:mkid(filename, namespace, name)
-  local fullpath = Path:new(self.project_root, "tests/integration/cpp/src", filename):absolute()
-  if name ~= nil then
-    return table.concat({ fullpath, namespace, name }, "::")
-  end
-  if namespace ~= nil then
+  local fullpath = Path:new(self.cpp_root, "src", filename):absolute()
+  if name ~= nil or namespace ~= nil then
+    assert(namespace ~= nil, "cannot provide name but no namespace")
     return table.concat({ fullpath, namespace }, "::")
   end
   return fullpath

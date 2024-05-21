@@ -188,12 +188,29 @@ function NeotestAdapter:_build_spec_for_executable(executable, nodes)
     command = command,
     context = {
       results_path = results_path,
-      positions = vim.tbl_map(function(x)
-        return x:data().id
-      end, nodes),
+      name2path = self:_map_names_to_paths(nodes),
     },
     strategy = self:_make_strategy_for_command(command),
   }
+end
+
+---@param nodes neotest.Tree[]
+---@return table<string, string>
+---@private
+function NeotestAdapter:_map_names_to_paths(nodes)
+  local name2path = {}
+  for _, node in ipairs(nodes) do
+    local data = node:data()
+    if data.type == "test" then
+      local ns_name = node:parent():data().name
+      name2path[ns_name .. "." .. data.name] = data.path
+    elseif data.type == "namespace" then
+      name2path[data.name] = data.path
+    else
+      utils.schedule_error("unknown node type " .. type)
+    end
+  end
+  return name2path
 end
 
 ---@param command string[]
