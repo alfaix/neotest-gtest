@@ -4,6 +4,7 @@ MINIMAL_INIT = tests/unit/minimal_init.lua
 PLENARY_OPTS = {minimal_init='${MINIMAL_INIT}', sequential=true, timeout=1000}
 GTEST_TAG ?= main
 export GTEST_TAG
+export GTEST_PATH
 
 test: unit-test integration-test ;
 
