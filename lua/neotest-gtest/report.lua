@@ -3,7 +3,7 @@ local lib = require("neotest.lib")
 local config = require("neotest-gtest.config")
 
 ---@class neotest-gtest.Report
----@field _result_json table
+---@field _node neotest.Tree
 ---@field _gtest_json table
 local Report = {}
 
@@ -11,21 +11,17 @@ local function colors()
   return config.summary_view.shell_palette
 end
 
+---@param gtest_data table
+---@param node neotest.Tree
 ---@return neotest-gtest.Report
-function Report:new(gtest_data, tree)
-  local obj = { _gtest_json = gtest_data }
+function Report:new(gtest_data, node)
+  local obj = { _gtest_json = gtest_data, _node = node }
   setmetatable(obj, { __index = self })
-  obj._node = tree:get_key(obj:position_id()):data()
   return obj
 end
 
 function Report:position_id()
-  if self._position_id == nil then
-    local test = self._gtest_json
-    local abs_file = utils.normalize_path(test.file)
-    self._position_id = table.concat({ abs_file, test.classname, test.name }, "::")
-  end
-  return self._position_id
+  return self._node:data().id
 end
 
 ---@param full_output string Path to a text file with full test output
@@ -123,7 +119,7 @@ function Report:_error_info(gtest_error)
     colors()[gtest_error],
   }
 
-  if parsed_error.linenum ~= nil and parsed_error.filename == self._node.path then
+  if parsed_error.linenum ~= nil and parsed_error.filename == self._node:data().path then
     -- gogle test ines are 1-indexed, neovim expects 0-indexed
     -- also neotest only shows errors in the same file as the test
     neotest_error.line = parsed_error.linenum - 1
@@ -168,7 +164,7 @@ function Report:_extract_header(filename, linenum)
     return nil
   end
   assert(filename ~= nil, "regex either matches both or neither")
-  if filename == self._node.path then
+  if filename == self._node:data().path then
     return string.format("Assertion failure at line %d:", linenum)
   else
     return string.format("Assertion failure in %s at line %d:", filename, linenum)
@@ -216,12 +212,42 @@ function ReportConverter:make_neotest_results()
   local results = {}
   for _, testsuite in ipairs(gtest_json.testsuites) do
     for _, test in ipairs(testsuite.testsuite) do
-      local report = Report:new(test, self._tree)
-      results[report:position_id()] = report:to_neotest_report(self._result.output)
+      local node = self:_find_node_by_name(testsuite.name, test.name)
+      assert(node, string.format("node not found for %s.%s", testsuite.name, test.name))
+      local report = Report:new(test, node)
+      results[node:data().id] = report:to_neotest_report(self._result.output)
     end
   end
   self:_notify_if_incomplete_results(results)
   return results
+end
+
+function ReportConverter:_find_node_by_name(namespace, name)
+  local ctx = assert(self._spec.context, "context must not be nil")
+  local fpath
+  if ctx.name2path[namespace] then
+    fpath = ctx.name2path[namespace]
+  elseif ctx.name2path[namespace .. "." .. name] then
+    fpath = ctx.name2path[namespace .. "." .. name]
+  end
+  -- This can happen if plugin is working correctly but paths are misconfigured:
+  -- Say, file1 has test A::B and file2 has A::C, but they compile to different
+  -- executables. Now, you try to run file2 through file1's executable with
+  -- --gtest_filter=A.*: the results will include A::B from file1
+  -- (since it's the wrong executable and A.* means all tests in A), but it
+  -- will not be present in name2path. In a perfect world, we would let the
+  -- user know, but even this explanation is hard to follow, so if this happens
+  -- let them file a github issue and we'll figure it out together.
+  assert(
+    fpath,
+    string.format(
+      "Internal error: test %s.%s executed but not provided in name2path",
+      namespace,
+      name
+    )
+  )
+  local node_id = table.concat({ fpath, namespace, name }, "::")
+  return self._tree:get_key(node_id)
 end
 
 function ReportConverter:_notify_if_incomplete_results(results)
@@ -258,15 +284,14 @@ function ReportConverter:_collect_missing_nodes(results)
     namespaces[extract_namespace(node_id)] = true
   end
 
-  for _, node_id in ipairs(self._spec.context.positions) do
-    if is_leaf_id(node_id) and results[node_id] == nil then
-      missing[#missing + 1] = node_id
-    elseif is_namespace_id(node_id) then
-      -- fname::NamespaceId
-      local namespace_name = vim.split(node_id, "::")[2]
-      if not namespaces[namespace_name] then
+  for name, fpath in pairs(self._spec.context.name2path) do
+    local node_id = fpath .. "::" .. string.gsub(name, "%.", "::")
+    if is_namespace_id(node_id) then
+      if not namespaces[name] then
         missing[#missing + 1] = node_id
       end
+    elseif is_leaf_id(node_id) and results[node_id] == nil then
+      missing[#missing + 1] = node_id
     end
   end
   return missing

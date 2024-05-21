@@ -13,7 +13,6 @@ FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG ${GTEST_TAG})
-FetchContent_Populate(googletest)
 
 if(${GTEST_TAG} STREQUAL "main")
   set(GTEST_VERSION "999.999")
@@ -30,10 +29,14 @@ else()
 endif()
 
 if(${GTEST_TAG} STREQUAL "main" OR ${GTEST_VERSION} VERSION_GREATER_EQUAL
-                                   "1.11")
+                                   "1.12")
+  message(STATUS "Compiling against GTest::gtest_main")
   set(GTEST_TARGET GTest::gtest_main)
+  FetchContent_MakeAvailable(googletest)
 else()
+  message(STATUS "Compiling against gtest_main")
   set(GTEST_TARGET gtest_main)
+  FetchContent_Populate(googletest)
   add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR}
                    EXCLUDE_FROM_ALL)
 endif()
