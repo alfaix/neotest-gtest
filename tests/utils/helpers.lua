@@ -56,10 +56,14 @@ local function parent_dir(path)
 end
 
 local function writefile(path, contents)
-  local fd = assert(nio.uv.fs_open(path, "w", tonumber("0600", 8)))
-  assert(nio.uv.fs_write(fd, contents, -1))
-  assert(nio.uv.fs_fsync(fd))
-  assert(nio.uv.fs_close(fd))
+  local open_err, file_fd = nio.uv.fs_open(path, "w", 438)
+  assert(not open_err and file_fd, open_err)
+  local write_err = nio.uv.fs_write(file_fd, contents, 0)
+  assert(not write_err, write_err)
+  local sync_err = nio.uv.fs_fsync(file_fd)
+  assert(not sync_err, sync_err)
+  local close_err = nio.uv.fs_close(file_fd)
+  assert(not close_err, close_err)
 end
 
 function M.write_file_tree(root, relpath2contents)
