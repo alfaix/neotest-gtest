@@ -45,7 +45,7 @@ jobs:
             rev: nightly
             gtest_tag: main
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Prepare dependencies
         run: |
           mkdir -p _neovim
@@ -61,7 +61,7 @@ jobs:
           ln -s ${PLUGINS_PATH} ~/.local/share/nvim/lazy
           export PATH="${PWD}/_neovim/bin:${PATH}"
           export VIM="${PWD}/_neovim/share/nvim/runtime"
-          nvim --headless -c 'TSInstallSync lua | quit'
+          nvim --headless -c 'TSInstallSync lua cpp | quit'
 
       - name: Run tests
         run: |
