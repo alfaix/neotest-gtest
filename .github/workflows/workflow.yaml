@@ -58,8 +58,7 @@ jobs:
           git clone --depth 1 https://github.com/nvim-neotest/nvim-nio ${PLUGINS_PATH}/nvim-nio
           git clone --depth 1 https://github.com/mfussenegger/nvim-dap ${PLUGINS_PATH}/nvim-dap
           git clone --depth 1 https://github.com/nvim-neotest/neotest ${PLUGINS_PATH}/neotest
-          mkdir -p ~/.local/share/nvim/
-          ln -s ${PLUGINS_PATH} ~/.local/share/nvim/lazy/
+          ln -s ${PLUGINS_PATH} ~/.local/share/nvim/lazy
           export PATH="${PWD}/_neovim/bin:${PATH}"
           export VIM="${PWD}/_neovim/share/nvim/runtime"
           nvim --headless -c 'TSInstallSync lua | quit'
