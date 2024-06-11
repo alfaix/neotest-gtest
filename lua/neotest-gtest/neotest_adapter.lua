@@ -185,6 +185,7 @@ function NeotestAdapter:_build_spec_for_executable(executable, nodes)
   })
 
   return {
+    cwd = utils.normalized_root(vim.loop.cwd()),
     command = command,
     context = {
       results_path = results_path,
