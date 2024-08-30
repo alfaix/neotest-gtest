@@ -281,7 +281,12 @@ function ReportConverter:_collect_missing_nodes(results)
   local missing = {}
   local namespaces = {}
   for node_id, _ in pairs(results) do
-    namespaces[extract_namespace(node_id)] = true
+    if node_id ~= nil then
+        local namespace = extract_namespace(node_id)
+        if namespace ~= nil then
+            namespaces[extract_namespace(node_id)] = true
+        end
+    end
   end
 
   for name, fpath in pairs(self._spec.context.name2path) do
@@ -295,6 +300,7 @@ function ReportConverter:_collect_missing_nodes(results)
     end
   end
   return missing
+
 end
 
 ---@private
