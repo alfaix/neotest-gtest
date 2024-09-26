@@ -59,7 +59,7 @@ end
 ---Extracts test positions from a source using the given query
 ---@param query vim.treesitter.Query The query to use
 ---@param source string The text of the source file.
----@param root vim.treesitter.LanguageTree The root of the tree
+---@param root TSNode The root of the tree
 ---@return table
 ---@return table
 local function extract_captures(
@@ -84,7 +84,7 @@ local function extract_captures(
     return vim.treesitter.get_node_text(node, source)
   end
 
-  for _, match in query:iter_matches(root, source) do
+  for _, match in query:iter_matches(root, source, nil, nil, { all = false }) do
     local namespace_name = gettext(match, "namespace.name")
     local test_kind = gettext(match, "test.kind")
     local test_name = gettext(match, "test.name")
