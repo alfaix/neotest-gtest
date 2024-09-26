@@ -84,7 +84,7 @@ local function extract_captures(
     return vim.treesitter.get_node_text(node, source)
   end
 
-  for _, match in query:iter_matches(root, source, nil, nil, {all = false}) do
+  for _, match in query:iter_matches(root, source, nil, nil, { all = false }) do
     local namespace_name = gettext(match, "namespace.name")
     local test_kind = gettext(match, "test.kind")
     local test_name = gettext(match, "test.name")
