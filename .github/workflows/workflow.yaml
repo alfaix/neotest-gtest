@@ -49,7 +49,13 @@ jobs:
       - name: Prepare dependencies
         run: |
           mkdir -p _neovim
-          curl -sL "https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}/nvim-linux64.tar.gz" | tar xzf - --strip-components=1 -C "${PWD}/_neovim"
+          NEOVIM_URL="https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}"
+          if curl -fsL "${NEOVIM_URL}/nvim-linux64.tar.gz" >/tmp/nvim.tar.gz; then
+            tar xzf /tmp/nvim.tar.gz --strip-components=1 -C "${PWD}/_neovim"
+          else
+            curl -fsL "${NEOVIM_URL}/nvim-linux-x86_64.tar.gz" >/tmp/nvim.tar.gz
+            tar xzf /tmp/nvim.tar.gz --strip-components=1 -C "${PWD}/_neovim"
+          fi
           git clone --depth 1 --branch ${{ matrix.gtest_tag }} https://github.com/google/googletest ${PWD}/_googletest
           export PLUGINS_PATH=~/.local/share/nvim/site/pack/vendor/start
           mkdir -p $PLUGINS_PATH
