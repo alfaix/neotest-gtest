@@ -185,7 +185,7 @@ end
 
 local function get_file_language(file_path)
   local ft = files.detect_filetype(file_path)
-  return require("nvim-treesitter.parsers").ft_to_lang(ft)
+  return vim.treesitter.language.get_lang(ft)
 end
 
 local function parser_get_tree(lang_tree)
