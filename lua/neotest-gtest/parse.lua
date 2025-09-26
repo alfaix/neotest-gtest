@@ -185,7 +185,27 @@ end
 
 local function get_file_language(file_path)
   local ft = files.detect_filetype(file_path)
-  return require("nvim-treesitter.parsers").ft_to_lang(ft)
+
+  -- Try newer API first
+  local ok, parsers = pcall(require, "nvim-treesitter.parsers")
+  if ok and parsers.get_parser_configs then
+    local configs = parsers.get_parser_configs()
+    for lang, parser_config in pairs(configs) do
+      if parser_config.filetype and vim.tbl_contains(parser_config.filetype, ft) then
+        return lang
+      end
+    end
+  end
+
+  -- Fallback to manual mapping
+  local ft_to_lang_map = {
+    cpp = "cpp",
+    c = "c",
+    cc = "cpp",
+    cxx = "cpp",
+  }
+
+  return ft_to_lang_map[ft] or ft
 end
 
 local function parser_get_tree(lang_tree)
