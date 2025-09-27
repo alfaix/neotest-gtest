@@ -233,15 +233,40 @@ function M.normalized_root(path)
   end
 end
 
+local function _schedule(fn)
+  if nio.schedule then
+    nio.schedule(fn)
+  else
+    vim.schedule(fn)
+  end
+end
+
+local function in_coroutine()
+  return coroutine.running() ~= nil
+end
+
 function M.schedule_notify(msg, level, opts)
-  nio.scheduler()
-  vim.notify(msg, level, opts)
+  if in_coroutine() then
+    nio.scheduler()
+    vim.notify(msg, level, opts)
+  else
+    _schedule(function()
+      vim.notify(msg, level, opts)
+    end)
+  end
 end
 
 function M.schedule_error(message, level)
-  nio.scheduler()
-  -- can be overloaded by various plugins to call non-fast API (e.g., noice.nvim)
-  error(message, level)
+  if in_coroutine() then
+    nio.scheduler()
+    -- can be overloaded by various plugins to call non-fast API (e.g., noice.nvim)
+    error(message, level)
+  else
+    _schedule(function()
+      -- can be overloaded by various plugins to call non-fast API (e.g., noice.nvim)
+      error(message, level)
+    end)
+  end
 end
 
 return M
