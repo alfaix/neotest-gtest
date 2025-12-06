@@ -169,6 +169,8 @@ function M.setup()
         client = _client
       end,
     },
+    -- Disable quickfix consumer to avoid race conditions in tests
+    quickfix = { enabled = false },
   })
 
   -- call any function to trigger ensure_started()
