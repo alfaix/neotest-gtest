@@ -23,45 +23,83 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04]
-        rev: [nightly, v0.9.1, v0.10.0]
+        rev: [v0.10.0, v0.12.0, nightly]
         gtest_tag: [main]
+        # Pin nvim-treesitter for older Neovim versions that are no longer
+        # supported by nvim-treesitter main (which requires Nvim 0.12+).
+        nvim_treesitter_ref: [main]
         include:
+          # Older Neovim needs pinned nvim-treesitter (last version before 0.12 requirement)
+          - os: ubuntu-22.04
+            rev: v0.10.0
+            gtest_tag: main
+            nvim_treesitter_ref: 310f0925
+          # Google Test version matrix (on nightly)
           - os: ubuntu-22.04
             rev: nightly
             gtest_tag: release-1.10.0
+            nvim_treesitter_ref: main
           - os: ubuntu-22.04
             rev: nightly
             gtest_tag: release-1.11.0
+            nvim_treesitter_ref: main
           - os: ubuntu-22.04
             rev: nightly
             gtest_tag: release-1.12.1
+            nvim_treesitter_ref: main
           - os: ubuntu-22.04
             rev: nightly
             gtest_tag: v1.13.0
+            nvim_treesitter_ref: main
           - os: ubuntu-22.04
             rev: nightly
             gtest_tag: v1.14.0
+            nvim_treesitter_ref: main
           - os: ubuntu-22.04
             rev: nightly
             gtest_tag: main
+            nvim_treesitter_ref: main
+        exclude:
+          # Exclude the default v0.10.0 entry (overridden in include with pinned TS)
+          - rev: v0.10.0
+            nvim_treesitter_ref: main
     steps:
       - uses: actions/checkout@v4
       - name: Prepare dependencies
         run: |
           mkdir -p _neovim
-          curl -sL "https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}/nvim-linux64.tar.gz" | tar xzf - --strip-components=1 -C "${PWD}/_neovim"
+          NEOVIM_URL="https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}"
+          # Neovim >= v0.10.4 changed the archive name from nvim-linux64 to nvim-linux-x86_64
+          if curl -fsL "${NEOVIM_URL}/nvim-linux-x86_64.tar.gz" -o /tmp/nvim.tar.gz; then
+            tar xzf /tmp/nvim.tar.gz --strip-components=1 -C "${PWD}/_neovim"
+          else
+            curl -fsL "${NEOVIM_URL}/nvim-linux64.tar.gz" -o /tmp/nvim.tar.gz
+            tar xzf /tmp/nvim.tar.gz --strip-components=1 -C "${PWD}/_neovim"
+          fi
           git clone --depth 1 --branch ${{ matrix.gtest_tag }} https://github.com/google/googletest ${PWD}/_googletest
           export PLUGINS_PATH=~/.local/share/nvim/site/pack/vendor/start
           mkdir -p $PLUGINS_PATH
           git clone --depth 1 https://github.com/nvim-lua/plenary.nvim ${PLUGINS_PATH}/plenary.nvim
-          git clone --depth 1 https://github.com/nvim-treesitter/nvim-treesitter ${PLUGINS_PATH}/nvim-treesitter
+          git clone https://github.com/nvim-treesitter/nvim-treesitter ${PLUGINS_PATH}/nvim-treesitter
+          git -C ${PLUGINS_PATH}/nvim-treesitter checkout ${{ matrix.nvim_treesitter_ref }}
           git clone --depth 1 https://github.com/nvim-neotest/nvim-nio ${PLUGINS_PATH}/nvim-nio
           git clone --depth 1 https://github.com/mfussenegger/nvim-dap ${PLUGINS_PATH}/nvim-dap
           git clone --depth 1 https://github.com/nvim-neotest/neotest ${PLUGINS_PATH}/neotest
           ln -s ${PLUGINS_PATH} ~/.local/share/nvim/lazy
           export PATH="${PWD}/_neovim/bin:${PATH}"
           export VIM="${PWD}/_neovim/share/nvim/runtime"
-          nvim --headless -c 'TSInstallSync lua cpp | quit'
+
+      - name: Install TreeSitter parsers
+        run: |
+          export PATH="${PWD}/_neovim/bin:${PATH}"
+          export VIM="${PWD}/_neovim/share/nvim/runtime"
+          if nvim --headless -c 'TSInstallSync lua cpp | quit' 2>/dev/null; then
+            echo "Installed parsers via TSInstallSync"
+          else
+            npm install -g tree-sitter-cli
+            nvim --headless -c 'lua require("nvim-treesitter").install({"cpp", "lua"}); vim.wait(120000, function() local i = require("nvim-treesitter").get_installed(); for _, l in ipairs(i) do if l == "cpp" then return true end end; return false end, 1000)' -c 'quit'
+            echo "Installed parsers via nvim-treesitter Lua API"
+          fi
 
       - name: Run tests
         run: |

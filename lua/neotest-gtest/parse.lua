@@ -76,19 +76,29 @@ local function extract_captures(
   local namespaces = {}
   local tests = {}
   add_reverse_lookup(query.captures)
-  local gettext = function(match, capture_name)
-    local node = match[query.captures[capture_name]]
-    if node == nil then
-      error(vim.inspect({ node, match, query.captures, capture_name }))
+
+  -- In Neovim 0.12+, iter_matches returns tables of nodes ({node}) instead of
+  -- single nodes, even with {all=false}. This helper unwraps both formats.
+  local function get_node(match, capture_name)
+    local value = match[query.captures[capture_name]]
+    if value == nil then
+      error(vim.inspect({ value, match, query.captures, capture_name }))
     end
-    return vim.treesitter.get_node_text(node, source)
+    if type(value) == "table" then
+      return value[1]
+    end
+    return value
+  end
+
+  local gettext = function(match, capture_name)
+    return vim.treesitter.get_node_text(get_node(match, capture_name), source)
   end
 
   for _, match in query:iter_matches(root, source, nil, nil, { all = false }) do
     local namespace_name = gettext(match, "namespace.name")
     local test_kind = gettext(match, "test.kind")
     local test_name = gettext(match, "test.name")
-    local test_definition = match[query.captures["test.definition"]]
+    local test_definition = get_node(match, "test.definition")
 
     tests[#tests + 1] = {
       name = test_name,
@@ -194,13 +204,22 @@ local function parser_get_tree(lang_tree)
   if injections_text == nil then
     -- TODO can there be more than one?...
     local injection_file = vim.treesitter.query.get_files("cpp", "injections")[1]
-    injections_text = files.read(injection_file)
+    if injection_file then
+      injections_text = files.read(injection_file)
+    else
+      injections_text = ""
+    end
   end
-  vim.treesitter.query.set("cpp", "injections", "")
+
+  if injections_text ~= "" then
+    vim.treesitter.query.set("cpp", "injections", "")
+  end
 
   local root = ts_lib.fast_parse(lang_tree):root()
 
-  vim.treesitter.query.set("cpp", "injections", injections_text)
+  if injections_text ~= "" then
+    vim.treesitter.query.set("cpp", "injections", injections_text)
+  end
   return root
 end
 
