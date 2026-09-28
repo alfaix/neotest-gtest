@@ -104,7 +104,7 @@ end
 
 ---@class neotest-gtest.NeotestAdapter
 ---@field _tree neotest.Tree
----@field _extra_args string
+---@field _extra_args string|string[]
 ---@field _strategy_name string
 ---@field _output_counter integer
 local NeotestAdapter = {}
@@ -174,15 +174,18 @@ function NeotestAdapter:_build_spec_for_executable(executable, nodes)
     history_size = config.history_size,
   }) .. "/test_result_" .. self._output_counter .. ".json"
 
-  local command = vim.tbl_flatten({
-    executable,
-    "--gtest_filter=" .. table.concat(filters, ":"),
-    "--gtest_output=json:" .. results_path,
-    -- By default disabled when redirected to a file, but we want to enable it
-    -- because we preserve shell colors.
-    "--gtest_color=yes",
-    self._extra_args,
-  })
+  local command = vim
+    .iter({
+      executable,
+      "--gtest_filter=" .. table.concat(filters, ":"),
+      "--gtest_output=json:" .. results_path,
+      -- By default disabled when redirected to a file, but we want to enable it
+      -- because we preserve shell colors.
+      "--gtest_color=yes",
+      self._extra_args,
+    })
+    :flatten(math.huge)
+    :totable()
 
   return {
     cwd = utils.normalized_root(vim.loop.cwd()),

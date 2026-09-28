@@ -8,7 +8,6 @@ local ts_lib = require("neotest.lib").treesitter
 local types = require("neotest.types")
 
 local Tree = types.Tree
-local injections_text = nil
 
 -- treesitter matches TEST macros as function definitions
 -- treesitter cannot possibly know about macros defined in other files, so this
@@ -19,12 +18,14 @@ local injections_text = nil
 -- Thus, we match all function definitions that meet ALL of the following criteria:
 -- * Named TEST/TEST_F/TEST_P (#any-of)
 -- * Do not declare a return type (!type)
--- * Only have two parameters (. anchors)
--- * Both parameters are unnamed (!declarator)
+-- * Only have two parameters, ignoring comments
+-- * Both parameters are unnamed
 -- * Both parameters' type is a simple type_identifier, i.e., no references
---   or cv-qualifiers or templates (type: (type_identifier))
+--   or cv-qualifiers or templates
 -- The first parameter is the test suite, the second one is the test case
 -- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
+-- Parameters are checked in Lua: anchors around quantified (comment)* nodes
+-- behave differently across tree-sitter versions.
 local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
   "cpp",
   [[
@@ -32,14 +33,7 @@ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
     declarator: (
         function_declarator
           declarator: (identifier) @test.kind
-        parameters: (
-          parameter_list
-            . (comment)*
-            . (parameter_declaration type: (type_identifier) !declarator) @namespace.name
-            . (comment)*
-            . (parameter_declaration type: (type_identifier) !declarator) @test.name
-            . (comment)*
-        )
+          parameters: (parameter_list) @test.parameters
       )
       !type
   )
@@ -47,6 +41,32 @@ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
   @test.definition
 ]]
 )
+
+---Returns the type names of the two parameters of a TEST macro, or nil if the
+---parameter list does not look like one.
+---@param parameters TSNode
+---@param source string
+---@return string?, string?
+local function macro_arguments(parameters, source)
+  local names = {}
+  for child in parameters:iter_children() do
+    if child:named() and child:type() ~= "comment" then
+      local type_node = child:field("type")[1]
+      if
+        child:type() ~= "parameter_declaration"
+        or child:field("declarator")[1] ~= nil
+        or type_node:type() ~= "type_identifier"
+      then
+        return nil
+      end
+      names[#names + 1] = vim.treesitter.get_node_text(type_node, source)
+    end
+  end
+  if #names ~= 2 then
+    return nil
+  end
+  return names[1], names[2]
+end
 
 local function add_reverse_lookup(tbl)
   local keys = vim.tbl_keys(tbl)
@@ -76,19 +96,26 @@ local function extract_captures(
   local namespaces = {}
   local tests = {}
   add_reverse_lookup(query.captures)
-  local gettext = function(match, capture_name)
-    local node = match[query.captures[capture_name]]
-    if node == nil then
-      error(vim.inspect({ node, match, query.captures, capture_name }))
+
+  local function get_node(match, capture_name)
+    local nodes = match[query.captures[capture_name]]
+    if nodes == nil then
+      error(vim.inspect({ nodes, match, query.captures, capture_name }))
     end
-    return vim.treesitter.get_node_text(node, source)
+    return nodes[1]
   end
 
-  for _, match in query:iter_matches(root, source, nil, nil, { all = false }) do
-    local namespace_name = gettext(match, "namespace.name")
+  local gettext = function(match, capture_name)
+    return vim.treesitter.get_node_text(get_node(match, capture_name), source)
+  end
+
+  for _, match in query:iter_matches(root, source) do
+    local namespace_name, test_name = macro_arguments(get_node(match, "test.parameters"), source)
+    if namespace_name == nil then
+      goto continue
+    end
     local test_kind = gettext(match, "test.kind")
-    local test_name = gettext(match, "test.name")
-    local test_definition = match[query.captures["test.definition"]]
+    local test_definition = get_node(match, "test.definition")
 
     tests[#tests + 1] = {
       name = test_name,
@@ -111,6 +138,7 @@ local function extract_captures(
         namespace[4] = math.max(colend, namespace[4])
       end
     end
+    ::continue::
   end
   return namespaces, tests
 end
@@ -124,7 +152,7 @@ local function position_id(position, parents)
   parents = vim.tbl_map(function(pos)
     return pos.name
   end, parents)
-  local elements = vim.tbl_flatten({ position.path, parents, position.name })
+  local elements = vim.iter({ position.path, parents, position.name }):flatten():totable()
   return table.concat(elements, "::")
 end
 
@@ -188,26 +216,10 @@ local function get_file_language(file_path)
   return vim.treesitter.language.get_lang(ft)
 end
 
-local function parser_get_tree(lang_tree)
-  -- Workaround for https://github.com/neovim/neovim/issues/21275
-  -- See https://github.com/nvim-treesitter/nvim-treesitter/issues/4221 for more details
-  if injections_text == nil then
-    -- TODO can there be more than one?...
-    local injection_file = vim.treesitter.query.get_files("cpp", "injections")[1]
-    injections_text = files.read(injection_file)
-  end
-  vim.treesitter.query.set("cpp", "injections", "")
-
-  local root = ts_lib.fast_parse(lang_tree):root()
-
-  vim.treesitter.query.set("cpp", "injections", injections_text)
-  return root
-end
-
 local function parse_positions_from_string(file_path, content)
   local lang = get_file_language(file_path)
   local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
-  local treesitter_tree = parser_get_tree(lang_tree)
+  local treesitter_tree = ts_lib.fast_parse(lang_tree):root()
   local tests_tree = collect_tests(file_path, content, treesitter_tree)
   local neotest_tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
