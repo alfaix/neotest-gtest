@@ -24,7 +24,7 @@ else()
   string(REGEX MATCH "^(v|release-)([0-9]+)\.([0-9]+)\." GTEST_VERSION_MATCH
                ${GTEST_TAG})
   if(NOT ${GTEST_VERSION_MATCH} STREQUAL "")
-    set(GTEST_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+    set(GTEST_VERSION "${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
   else()
     message(
       FATAL_ERROR
@@ -43,6 +43,9 @@ else()
   FetchContent_Populate(googletest)
   add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR}
                    EXCLUDE_FROM_ALL)
+  # Old gtest builds itself with -Werror, which newer compilers break.
+  target_compile_options(gtest PRIVATE -Wno-error)
+  target_compile_options(gtest_main PRIVATE -Wno-error)
 endif()
 
 target_link_libraries(test-executable ${GTEST_TARGET})
