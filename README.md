@@ -8,10 +8,10 @@ It should work well out-of-the-box for most cases, though some features (see bel
 are not yet supported.
 
 ## Requirements
-* Neovim 0.9.1+, 0.10.x, or nightly.
+* Neovim 0.12+ or nightly.
 * [Google Test][google-test] 1.10+
 * [neotest] (latest, incl. nvim-nio and plenary.nvim)
-* [nvim-treesitter] (latest, with CPP parser installed via `TSInstall cpp`)
+* Tree-sitter CPP parser (e.g., via [nvim-treesitter]'s `TSInstall cpp`)
 * [nvim-dap] (latest, _optional_, required for debugging)
 
 ## Features
