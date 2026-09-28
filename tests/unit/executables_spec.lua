@@ -222,4 +222,112 @@ describe("test global registry", function()
 
     assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
   end)
+
+  it("CMake lookup by test", function()
+    local cmakeRegistry = ExecutablesRegistry:new("/tmp")
+    local node_id = "/tmp/project/test.cpp::testFixture::test"
+    package.loaded["cmake-tools"] = {
+      get_build_directory = function()
+        return "/tmp/project/build"
+      end,
+      get_model_info = function()
+        return {
+          {
+            type = "EXECUTABLE",
+            artifacts = {
+              { path = "test" },
+            },
+            sources = {
+              {
+                path = "/tmp/project/test.cpp",
+              },
+            },
+          },
+        }
+      end,
+    }
+    local executable = cmakeRegistry:_lookup_cmake_executable(node_id)
+    assert.are.equal("/tmp/project/build/test", executable)
+  end)
+
+  it("CMake lookup by file", function()
+    local cmakeRegistry = ExecutablesRegistry:new("/tmp")
+    local node_id = "/tmp/project/test.cpp"
+    package.loaded["cmake-tools"] = {
+      get_build_directory = function()
+        return "/tmp/project/build"
+      end,
+      get_model_info = function()
+        return {
+          {
+            type = "EXECUTABLE",
+            artifacts = {
+              { path = "test" },
+            },
+            sources = {
+              {
+                path = "/tmp/project/test.cpp",
+              },
+            },
+          },
+        }
+      end,
+    }
+    local executable = cmakeRegistry:_lookup_cmake_executable(node_id)
+    assert.are.equal("/tmp/project/build/test", executable)
+  end)
+
+  it("CMake lookup by fixture", function()
+    local registry = ExecutablesRegistry:new("/tmp")
+    local node_id = "/tmp/project/test.cpp::testFixture"
+    package.loaded["cmake-tools"] = {
+      get_build_directory = function()
+        return "/tmp/project/build"
+      end,
+      get_model_info = function()
+        return {
+          {
+            type = "EXECUTABLE",
+            artifacts = {
+              { path = "test" },
+            },
+            sources = {
+              {
+                path = "/tmp/project/test.cpp",
+              },
+            },
+          },
+        }
+      end,
+    }
+    local executable = registry:_lookup_cmake_executable(node_id)
+    assert.are.equal("/tmp/project/build/test", executable)
+  end)
+
+  it("CMake lookup fail", function()
+    local cmakeRegistry = ExecutablesRegistry:new("/tmp")
+    local node_id = "/tmp/project/notfound.cpp::testFixture::test"
+    package.loaded["cmake-tools"] = {
+      get_build_directory = function()
+        return "/tmp/project/build"
+      end,
+      get_model_info = function()
+        return {
+          {
+            type = "EXECUTABLE",
+            artifacts = {
+              { path = "test" },
+            },
+            sources = {
+              {
+                path = "/tmp/project/test.cpp",
+              },
+            },
+          },
+        }
+      end,
+    }
+    local executable = cmakeRegistry:_lookup_cmake_executable(node_id)
+    assert.are.equal(nil, executable)
+  end)
 end)

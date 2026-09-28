@@ -1,4 +1,5 @@
 local Storage = require("neotest-gtest.storage")
+local config = require("neotest-gtest.config")
 local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local neotest = require("neotest")
@@ -65,7 +66,9 @@ end
 function ExecutablesRegistry:find_executables(id)
   self:_reload_tree()
   self:_ensure_node_within_root(id)
-  local exe = self._node2executable[id] or self:_lookup_ancestor_executable(id)
+  local exe = self._node2executable[id]
+    or self:_lookup_ancestor_executable(id)
+    or self:_lookup_cmake_executable(id)
   if exe ~= nil then
     return { [exe] = { id } }, nil
   end
@@ -87,6 +90,37 @@ function ExecutablesRegistry:_lookup_ancestor_executable(id)
     local exe = self._node2executable[ancestor]
     if exe ~= nil then
       return exe
+    end
+  end
+end
+
+
+-- Adapted from: https://github.com/alfaix/neotest-gtest/issues/12
+-- Original authors: ll-nick, AbaoFromCUG
+function ExecutablesRegistry:_lookup_cmake_executable(id)
+  local success, cmake_tools = pcall(require, "cmake-tools")
+  if not success then
+    return
+  end
+  local ancestors
+  if id:match("%.cpp$") then
+    ancestors = { id }
+  else
+    ancestors = utils.collect_iterable(self:_iter_ancestors(id))
+  end
+  local ancestors_set = utils.list_to_set(ancestors)
+  local build_dir = utils.normalize_path(tostring(cmake_tools.get_build_directory()))
+  local model_info = cmake_tools.get_model_info()
+  for _, target_info in pairs(model_info) do
+    if target_info.type == "EXECUTABLE" then
+      local executable_path_relative = target_info.artifacts[1].path
+      for _, source in ipairs(target_info.sources) do
+        local source_path = utils.normalize_path(source.path)
+        if ancestors_set[source_path] then
+          local executable_path = build_dir .. lib.files.sep .. executable_path_relative
+          return executable_path
+        end
+      end
     end
   end
 end
