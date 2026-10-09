@@ -88,6 +88,47 @@ describe("integration testsuite", function()
     assert.is_not_nil(leaf)
     assert.equals(3, #leaf:parent():children())
 
+    nio.scheduler()
+    vim.api.nvim_win_set_cursor(0, { leaf:parent():data().range[1] + 1, 0 })
+
+    local nearest = neotest.run.get_tree_from_args()
+    assert.equals(source_id, assert(nearest):data().id)
+
+    local dap_spec = assert(require("neotest-gtest").build_spec({
+      tree = leaf,
+      strategy = "dap",
+    })[1])
+
+    assert.equals(exe1, dap_spec.strategy.program)
+    assert.equals("--gtest_filter=First/ParamFixture.Positive/1", dap_spec.strategy.args[1])
+
+    local summary = require("neotest.consumers.summary")
+    summary.open()
+    summary:expand(source_id, true)
+
+    local summary_text
+    for _ = 1, 100 do
+      for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.bo[buffer].filetype == "neotest-summary" then
+          summary_text = table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n")
+          break
+        end
+      end
+
+      if summary_text and summary_text:find("Second/ParamFixture.Positive/0", 1, true) then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    assert.is_not_nil(summary_text)
+    assert.is_not_nil(summary_text:find("First/ParamFixture.Positive/0", 1, true))
+    assert.is_not_nil(summary_text:find("First/ParamFixture.Positive/1", 1, true))
+    assert.is_not_nil(summary_text:find("Second/ParamFixture.Positive/0", 1, true))
+
+    summary.close()
+
     state:run({ args = { leaf_id } })
     local specs = state._specs_recorder:await_specs()
 
@@ -97,6 +138,46 @@ describe("integration testsuite", function()
 
     local results = state._results_recorder:get_aggregated_results()
     assert.equals("passed", assert(results[leaf_id]).status)
+
+    state._specs_recorder:reset()
+    state._results_recorder:reset()
+
+    state:run({ args = { source_id } })
+
+    local parent_specs = state._specs_recorder:await_specs()
+    local parent_results = state._results_recorder:get_aggregated_results()
+    local report =
+      vim.json.decode(require("neotest.lib").files.read(parent_specs[1].context.results_path))
+
+    assert.equals(3, report.tests)
+    assert.equals("passed", assert(parent_results[source_id]).status)
+    assert.equals("passed", assert(parent_results[leaf_id]).status)
+
+    state._specs_recorder:reset()
+    state._results_recorder:reset()
+
+    state:run({ args = { file_id } })
+
+    local file_specs = state._specs_recorder:await_specs()
+    state._results_recorder:get_aggregated_results()
+
+    local file_report =
+      vim.json.decode(require("neotest.lib").files.read(file_specs[1].context.results_path))
+    local seen = {}
+
+    for _, suite in ipairs(file_report.testsuites) do
+      for _, test in ipairs(suite.testsuite) do
+        local name = suite.name .. "." .. test.name
+        assert.is_nil(seen[name])
+        seen[name] = true
+      end
+    end
+
+    assert.equals(9, file_report.tests)
+    assert.equals(9, vim.tbl_count(seen))
+    assert.is_true(seen["First/ParamFixture.Positive/0"])
+    assert.is_true(seen["First/ParamFixture.Positive/1"])
+    assert.is_true(seen["Second/ParamFixture.Positive/0"])
   end)
 
   it("unconfigured run throws an error", function()
