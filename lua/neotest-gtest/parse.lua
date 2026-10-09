@@ -137,15 +137,14 @@ end
 -- level is {parent, children...}
 -- Each child is in turn also a level
 -- Thus, {a, {b, {c}}, {d}, {e, {f}, {g}}} represents a(b(c))(d)(e(f,g))
--- We only have three levels: file, namespace, test
--- TEST_P instances share a source position and are combined when reporting.
+-- Runtime TEST_P cases form a fourth level below their source declaration.
 
 ---Builds a tree from a list of namespaces and tests extracted from
 ---the file represented by `fileobj`.
 ---@param fileobj neotest.Position The file to build the tree for
 ---@param tests any
 ---@return table
-local function build_tree(fileobj, namespaces, tests)
+local function build_tree(fileobj, namespaces, tests, runtime_by_source)
   local tree = { fileobj }
   local namespace2idx = {}
   for name, range in pairs(namespaces) do
@@ -170,12 +169,26 @@ local function build_tree(fileobj, namespaces, tests)
       extra = { kind = test.kind },
     }
     testobj.id = position_id(testobj, { namespace[1] })
-    namespace[#namespace + 1] = testobj
+    local source = testobj
+    if test.kind == "TEST_P" and runtime_by_source and runtime_by_source[testobj.id] then
+      source = { testobj }
+      for _, runtime_name in ipairs(runtime_by_source[testobj.id]) do
+        source[#source + 1] = {
+          id = testobj.id .. "::" .. runtime_name,
+          type = "test",
+          path = fileobj.path,
+          name = runtime_name,
+          range = test.range,
+          extra = { kind = "TEST_P", runtime_name = runtime_name },
+        }
+      end
+    end
+    namespace[#namespace + 1] = source
   end
   return tree
 end
 
-local function collect_tests(file_path, source, root)
+local function collect_tests(file_path, source, root, runtime_by_source)
   local path_elems = vim.split(file_path, files.sep, { plain = true })
   local fileobj = {
     id = file_path,
@@ -185,7 +198,7 @@ local function collect_tests(file_path, source, root)
     range = { root:range() },
   }
   local namespaces, tests = extract_captures(TREESITTER_GTEST_QUERY, source, root)
-  return build_tree(fileobj, namespaces, tests)
+  return build_tree(fileobj, namespaces, tests, runtime_by_source)
 end
 
 local function get_file_language(file_path)
@@ -209,23 +222,23 @@ local function parser_get_tree(lang_tree)
   return root
 end
 
-local function parse_positions_from_string(file_path, content)
+local function parse_positions_from_string(file_path, content, runtime_by_source)
   local lang = get_file_language(file_path)
   local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
   local treesitter_tree = parser_get_tree(lang_tree)
-  local tests_tree = collect_tests(file_path, content, treesitter_tree)
+  local tests_tree = collect_tests(file_path, content, treesitter_tree, runtime_by_source)
   local neotest_tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
   end)
   return neotest_tree
 end
 
-function M.parse_positions(file_path)
+function M.parse_positions(file_path, runtime_by_source)
   -- throttle: can cause very high CPU load for large projects and freeze
   nio.sleep(config.parsing_throttle_ms)
   local content = files.read(file_path)
   nio.scheduler()
-  return parse_positions_from_string(file_path, content)
+  return parse_positions_from_string(file_path, content, runtime_by_source)
 end
 
 return M

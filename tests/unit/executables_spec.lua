@@ -88,6 +88,13 @@ describe("executables with single test in file", function()
     assert_executables_for_node(test_id, { ["/bin/exe1"] = { test_id } })
   end)
 
+  it("resolves a configured source without requiring a Neotest tree refresh", function()
+    setup()
+    registry:update_executable(file_id, "/bin/exe1")
+    registry._tree = nil
+    assert.equals("/bin/exe1", registry:configured_executable_for(test_id))
+  end)
+
   it("executables mapping is persisted via the storage", function()
     setup()
     registry:update_executable(file_id, "/bin/exe1")

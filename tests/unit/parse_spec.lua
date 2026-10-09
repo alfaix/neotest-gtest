@@ -169,6 +169,59 @@ describe("config library", function()
     )
   end)
 
+  it("adds exact runtime children beneath their source declarations", function()
+    local source = [[
+      TEST_P(ParamFixture, Positive) {}
+      TEST_P(ParamFixture, Small) {}
+    ]]
+    local fpath = assert(vim.fn.tempname()) .. ".cpp"
+
+    lib.files.write(fpath, source)
+
+    local tree = parse_module.parse_positions(fpath, {
+      [fpath .. "::ParamFixture::Positive"] = {
+        "First/ParamFixture.Positive/0",
+        "First/ParamFixture.Positive/1",
+        "Second/ParamFixture.Positive/0",
+      },
+      [fpath .. "::ParamFixture::Small"] = {
+        "First/ParamFixture.Small/0",
+        "Second/ParamFixture.Small/0",
+      },
+    })
+
+    local positive = assert(tree:get_key(fpath .. "::ParamFixture::Positive"))
+    local small = assert(tree:get_key(fpath .. "::ParamFixture::Small"))
+
+    assert.equals(3, #positive:children())
+    assert.equals(2, #small:children())
+
+    for _, child in ipairs(positive:children()) do
+      local data = child:data()
+
+      assert.equals("test", data.type)
+      assert.equals(positive:data().id .. "::" .. data.name, data.id)
+      assert.equals(data.name, data.extra.runtime_name)
+      assert.equals("TEST_P", data.extra.kind)
+    end
+
+    assert.equals(
+      positive:data().id,
+      lib.positions.nearest(tree, positive:data().range[1]):data().id
+    )
+  end)
+
+  it("keeps an unconfigured TEST_P source without invented children", function()
+    local fpath = assert(vim.fn.tempname()) .. ".cpp"
+
+    lib.files.write(fpath, "TEST_P(ParamFixture, Positive) {}")
+
+    local tree = parse_module.parse_positions(fpath)
+    local source = assert(tree:get_key(fpath .. "::ParamFixture::Positive"))
+
+    assert.equals(0, #source:children())
+  end)
+
   it("correctly parses interrupted namespace", function()
     assert_parses_as(
       [[

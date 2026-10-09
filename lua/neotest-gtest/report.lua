@@ -219,6 +219,14 @@ function ReportConverter:make_neotest_results()
         local report = Report:new(test, node)
         local id = node:data().id
         local result = report:to_neotest_report(self._result.output)
+        local runtime_id = id .. "::" .. testsuite.name .. "." .. test.name
+        local runtime_node = self._tree:get_key(runtime_id)
+
+        if runtime_node then
+          results[runtime_id] = Report:new(test, runtime_node)
+            :to_neotest_report(self._result.output)
+        end
+
         if results[id] then
           local previous = results[id]
           if result.status == "failed" or previous.status == "failed" then
@@ -252,8 +260,7 @@ function ReportConverter:_find_node_by_name(namespace, name)
   if fpath == nil or name:find("/", 1, true) then
     source_namespace = namespace:match(".*/([^/]+)$") or namespace
     source_name = name:match("^([^/]+)/[^/]+$") or name
-    fpath = ctx.name2path[source_namespace .. "." .. source_name]
-      or ctx.name2path[source_namespace]
+    fpath = ctx.name2path[source_namespace .. "." .. source_name] or ctx.name2path[source_namespace]
   end
   -- This can happen if plugin is working correctly but paths are misconfigured:
   -- Say, file1 has test A::B and file2 has A::C, but they compile to different

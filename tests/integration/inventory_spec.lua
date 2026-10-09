@@ -3,8 +3,78 @@ local it = require("nio.tests").it
 local lib = require("neotest.lib")
 local inventory = require("neotest-gtest.executables.inventory")
 local parse = require("neotest-gtest.parse")
+local adapter = require("neotest-gtest")
+local config = require("neotest-gtest.config")
+local executables = require("neotest-gtest.executables")
+local GlobalRegistry = require("neotest-gtest.executables.global_registry")
 
 describe("compiled Google Test inventory", function()
+  local old_root
+  local old_lookup
+  local old_find_executables
+  local configured_registry
+
+  after_each(function()
+    if old_root then
+      config.root = old_root
+    end
+
+    if old_lookup then
+      configured_registry.configured_executable_for = old_lookup
+    end
+
+    if old_find_executables then
+      executables.find_executables = old_find_executables
+    end
+  end)
+
+  it("discovers three runtime leaves and runs one exact case", function()
+    local root = vim.uv.cwd() .. "/tests/integration/cpp"
+    local source = root .. "/src/test_two.cpp"
+    local executable = root .. "/build/test-executable"
+    local source_id = source .. "::ParamFixture::Positive"
+    local registry = GlobalRegistry:for_dir(root)
+
+    old_root = config.root
+    old_lookup = registry.configured_executable_for
+    old_find_executables = executables.find_executables
+    configured_registry = registry
+
+    config.root = function()
+      return root
+    end
+
+    registry.configured_executable_for = function()
+      return executable
+    end
+
+    executables.find_executables = function(node)
+      return { [executable] = { node:data().id } }, {}
+    end
+
+    local tree = adapter.discover_positions(source)
+    local parent = assert(tree:get_key(source_id))
+    local names = vim.tbl_map(function(node)
+      return node:data().name
+    end, parent:children())
+
+    assert.same({
+      "First/ParamFixture.Positive/0",
+      "First/ParamFixture.Positive/1",
+      "Second/ParamFixture.Positive/0",
+    }, names)
+
+    local leaf = assert(tree:get_key(source_id .. "::First/ParamFixture.Positive/1"))
+    local spec = assert(adapter.build_spec({ tree = leaf })[1])
+    local code = lib.process.run(spec.command, { stdout = true })
+    local report = vim.json.decode(lib.files.read(spec.context.results_path))
+
+    assert.equals("--gtest_filter=First/ParamFixture.Positive/1", spec.command[2])
+    assert.equals(0, code)
+    assert.equals(1, report.tests)
+    assert.equals("Positive/1", report.testsuites[1].testsuite[1].name)
+  end)
+
   it("resolves both methods across two differently sized instantiations", function()
     local root = vim.uv.cwd() .. "/tests/integration/cpp"
     local source = root .. "/src/test_two.cpp"

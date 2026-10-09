@@ -81,10 +81,22 @@ function TestsController:assert_results_published(files)
   local specs = self:_load_specs(files)
 
   local results, position2output_file = self._results_recorder:get_aggregated_results()
-  helpers.assert_same_keys(specs, results)
+  local source_results = {}
+  local positions = neotest.state.positions(self.adapter_id)
+
+  for id, result in pairs(results) do
+    local node = positions and positions:get_key(id)
+    local extra = node and node:data().extra
+
+    if not (extra and extra.runtime_name) then
+      source_results[id] = result
+    end
+  end
+
+  helpers.assert_same_keys(specs, source_results)
   for position, spec in pairs(specs) do
     spec.output_file = position2output_file[position]
-    spec:assert_matches_neotest_result(results[position])
+    spec:assert_matches_neotest_result(source_results[position])
   end
 end
 

@@ -61,6 +61,14 @@ function ExecutablesRegistry:list_executables()
   return vim.tbl_keys(executables_set)
 end
 
+---Look up a configured node or ancestor while discovery is rebuilding the tree.
+---@param id string
+---@return string|nil
+function ExecutablesRegistry:configured_executable_for(id)
+  self:_ensure_node_within_root(id)
+  return self._node2executable[id] or self:_lookup_ancestor_executable(id)
+end
+
 ---@param id string
 function ExecutablesRegistry:find_executables(id)
   self:_reload_tree()

@@ -1,6 +1,7 @@
 local neotest = require("neotest")
 local assert = require("luassert")
 local it = require("nio.tests").it
+local nio = require("nio")
 local controller = require("tests.utils.controller")
 
 ---@type neotest-gtest.IntegrationTestsController
@@ -57,6 +58,45 @@ describe("integration testsuite", function()
     assert.is_not_nil(result.short:find("First/ParamFixture.Positive/1", 1, true))
     assert.is_not_nil(result.short:find("Second/ParamFixture.Positive/0", 1, true))
     state.ui.notifications:assert_no_other_notifications()
+  end)
+
+  it("refreshes parameterized leaves on file save and selects one exact case", function()
+    setup()
+
+    local file_id = state:mkid("test_two.cpp")
+    local source_id = file_id .. "::ParamFixture::Positive"
+    local leaf_id = source_id .. "::First/ParamFixture.Positive/1"
+
+    state:configure_executables({ [exe1] = { file_id } })
+
+    nio.scheduler()
+    vim.cmd.edit(file_id)
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = 0 })
+
+    local leaf
+    for _ = 1, 100 do
+      local positions = neotest.state.positions(state.adapter_id)
+      leaf = positions and positions:get_key(leaf_id)
+
+      if leaf then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    assert.is_not_nil(leaf)
+    assert.equals(3, #leaf:parent():children())
+
+    state:run({ args = { leaf_id } })
+    local specs = state._specs_recorder:await_specs()
+
+    assert.equals(1, #specs)
+    assert.equals(exe1, specs[1].command[1])
+    assert.equals("--gtest_filter=First/ParamFixture.Positive/1", specs[1].command[2])
+
+    local results = state._results_recorder:get_aggregated_results()
+    assert.equals("passed", assert(results[leaf_id]).status)
   end)
 
   it("unconfigured run throws an error", function()

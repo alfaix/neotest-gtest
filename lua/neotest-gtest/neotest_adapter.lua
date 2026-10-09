@@ -8,6 +8,9 @@ local config = require("neotest-gtest.config")
 ---@return string filter Google Test filter string for the test
 local function get_filter_for_test_node(node)
   local data = node:data()
+  if data.extra and data.extra.runtime_name then
+    return data.extra.runtime_name
+  end
   local posid = data.id
   local test_kind = data.extra.kind
   if test_kind == "TEST_P" then
@@ -35,6 +38,7 @@ local function get_filters_for_nodes(nodes)
       for _, child in ipairs(node:children()) do
         if child:data().extra.kind == "TEST_P" then
           filters[#filters + 1] = "*/" .. namespace .. "." .. child:data().name .. "/*"
+          filters[#filters + 1] = namespace .. "." .. child:data().name .. "/*"
         end
       end
       return table.concat(filters, ":")
@@ -232,8 +236,14 @@ function NeotestAdapter:_map_names_to_paths(nodes)
   for _, node in ipairs(nodes) do
     local data = node:data()
     if data.type == "test" then
-      local ns_name = node:parent():data().name
-      name2path[ns_name .. "." .. data.name] = data.path
+      if data.extra and data.extra.runtime_name then
+        local source = node:parent()
+        local ns_name = source:parent():data().name
+        name2path[ns_name .. "." .. source:data().name] = data.path
+      else
+        local ns_name = node:parent():data().name
+        name2path[ns_name .. "." .. data.name] = data.path
+      end
     elseif data.type == "namespace" then
       name2path[data.name] = data.path
     else

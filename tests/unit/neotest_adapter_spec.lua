@@ -2,6 +2,9 @@ local config = require("neotest-gtest.config")
 local executables = require("neotest-gtest.executables")
 local neotest_spec_utils = require("tests.utils.neotest_spec")
 local it = require("nio").tests.it
+local parse = require("neotest-gtest.parse")
+local lib = require("neotest.lib")
+local NeotestAdapter = require("neotest-gtest.neotest_adapter")
 
 local MOCK_EXECUTABLE = "/build/some-gtest-executable"
 
@@ -100,17 +103,63 @@ describe("adapter spec", function()
   it("builds filters for all instances of a parameterized test", function()
     with_mock_executable_for_nodes({ "Fixture::Case" })
 
-    neotest_spec_utils.assert_spec_for_file(
-      [[TEST_P(Fixture, Case) {}]],
-      {
-        input_key = "Fixture::Case",
-        command = {
-          MOCK_EXECUTABLE,
-          "--gtest_filter=*/Fixture.Case/*:Fixture.Case/*",
-        },
-        allow_extra_args = true,
-      }
-    )
+    neotest_spec_utils.assert_spec_for_file([[TEST_P(Fixture, Case) {}]], {
+      input_key = "Fixture::Case",
+      command = {
+        MOCK_EXECUTABLE,
+        "--gtest_filter=*/Fixture.Case/*:Fixture.Case/*",
+      },
+      allow_extra_args = true,
+    })
+  end)
+
+  it("uses one exact compiled name for a runtime leaf and its DAP run", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = file .. "::Fixture::Case"
+    local runtime_name = "Custom/Fixture.Case/Alpha"
+
+    lib.files.write(file, "TEST_P(Fixture, Case) {}")
+
+    local tree = parse.parse_positions(file, { [source_id] = { runtime_name } })
+    local leaf = assert(tree:get_key(source_id .. "::" .. runtime_name))
+
+    executables.find_executables = function()
+      return { [MOCK_EXECUTABLE] = { leaf:data().id } }, {}
+    end
+
+    for _, strategy in ipairs({ "integrated", "dap" }) do
+      local spec = assert(NeotestAdapter:new({ tree = leaf, strategy = strategy }):build_specs()[1])
+
+      assert.equals("--gtest_filter=" .. runtime_name, spec.command[2])
+      assert.equals(MOCK_EXECUTABLE, spec.command[1])
+
+      if strategy == "dap" then
+        assert.equals(MOCK_EXECUTABLE, spec.strategy.program)
+        assert.equals("--gtest_filter=" .. runtime_name, spec.strategy.args[1])
+      end
+    end
+  end)
+
+  it("keeps parent and file selection over all compiled instances", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = file .. "::Fixture::Case"
+
+    lib.files.write(file, "TEST_P(Fixture, Case) {}")
+
+    local tree = parse.parse_positions(file, {
+      [source_id] = { "First/Fixture.Case/0", "Second/Fixture.Case/Custom" },
+    })
+
+    executables.find_executables = function(node)
+      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
+    end
+
+    local parent = assert(tree:get_key(source_id))
+    local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
+    local file_spec = assert(NeotestAdapter:new({ tree = tree }):build_specs()[1])
+
+    assert.equals("--gtest_filter=*/Fixture.Case/*:Fixture.Case/*", parent_spec.command[2])
+    assert.equals("--gtest_filter=Fixture.*:*/Fixture.Case/*:Fixture.Case/*", file_spec.command[2])
   end)
 
   it("includes parameterized tests when running a namespace", function()
@@ -123,7 +172,7 @@ describe("adapter spec", function()
       ]],
       {
         input_key = "Fixture",
-        command = { MOCK_EXECUTABLE, "--gtest_filter=Fixture.*:*/Fixture.Case/*" },
+        command = { MOCK_EXECUTABLE, "--gtest_filter=Fixture.*:*/Fixture.Case/*:Fixture.Case/*" },
         allow_extra_args = true,
       }
     )
