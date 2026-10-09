@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <vector>
+
 namespace test_two {
 
 class TestFixture : public ::testing::Test {
@@ -39,7 +41,15 @@ TEST_P(ParamFixture, Positive) { // NODE:ParamFixture::Positive,passed
   EXPECT_GE(GetParam(), 0);
 } // NODEEND
 
+TEST_P(ParamFixture, Small) { // NODE:ParamFixture::Small,passed
+  EXPECT_LE(GetParam(), 2);
+} // NODEEND
+
+static std::vector<int> second_values() { return {2}; }
+
 INSTANTIATE_TEST_SUITE_P(First, ParamFixture, ::testing::Values(0, 1));
-INSTANTIATE_TEST_SUITE_P(Second, ParamFixture, ::testing::Values(2));
+
+INSTANTIATE_TEST_SUITE_P(Second, ParamFixture,
+                         ::testing::ValuesIn(second_values()));
 
 } // namespace test_two
