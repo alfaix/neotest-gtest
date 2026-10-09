@@ -217,7 +217,20 @@ function ReportConverter:make_neotest_results()
         unknown[#unknown + 1] = testsuite.name .. "." .. test.name
       else
         local report = Report:new(test, node)
-        results[node:data().id] = report:to_neotest_report(self._result.output)
+        local id = node:data().id
+        local result = report:to_neotest_report(self._result.output)
+        if results[id] then
+          local previous = results[id]
+          if result.status == "failed" or previous.status == "failed" then
+            previous.status = "failed"
+          elseif result.status == "passed" then
+            previous.status = "passed"
+          end
+          previous.short = previous.short .. "\n\n" .. result.short
+          vim.list_extend(previous.errors, result.errors)
+        else
+          results[id] = result
+        end
       end
     end
   end
@@ -228,11 +241,19 @@ end
 
 function ReportConverter:_find_node_by_name(namespace, name)
   local ctx = assert(self._spec.context, "context must not be nil")
+  local source_namespace = namespace
+  local source_name = name
   local fpath
   if ctx.name2path[namespace] then
     fpath = ctx.name2path[namespace]
   elseif ctx.name2path[namespace .. "." .. name] then
     fpath = ctx.name2path[namespace .. "." .. name]
+  end
+  if fpath == nil or name:find("/", 1, true) then
+    source_namespace = namespace:match(".*/([^/]+)$") or namespace
+    source_name = name:match("^([^/]+)/[^/]+$") or name
+    fpath = ctx.name2path[source_namespace .. "." .. source_name]
+      or ctx.name2path[source_namespace]
   end
   -- This can happen if plugin is working correctly but paths are misconfigured:
   -- Say, file1 has test A::B and file2 has A::C, but they compile to different
@@ -250,8 +271,14 @@ function ReportConverter:_find_node_by_name(namespace, name)
       name
     )
   )
-  local node_id = table.concat({ fpath, namespace, name }, "::")
-  return self._tree:get_key(node_id)
+  local node_id = table.concat({ fpath, source_namespace, source_name }, "::")
+  local node = self._tree:get_key(node_id)
+  if source_namespace ~= namespace or source_name ~= name then
+    if node == nil or node:data().extra.kind ~= "TEST_P" then
+      return nil
+    end
+  end
+  return node
 end
 
 function ReportConverter:_notify_if_unknown_results(unknown)

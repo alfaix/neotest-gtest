@@ -23,11 +23,15 @@ The plugin provides full support of all neotest features:
 - debugging tests
 - all other niceties of neotest
 
-There are two major features which are not yet supported:
+One major feature is not yet supported:
 
-- `TEST_P` (parameterized tests)
 - Build tool integration for recompilation - you have to do that manually (or with
   some other plugin) for now
+
+`TEST_P` positions appear once per source test. Running one position runs all of
+its parameter instances, including multiple instantiations. Their results are
+combined at that position; any failed instance marks it failed, and the short
+output includes each instance.
 
 Contributions are welcome! :)
 

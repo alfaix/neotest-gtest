@@ -33,4 +33,13 @@ TEST_F(TestFixture, FailInFixture) { // NODE:TestFixture::FailInFixture,failed
   fail();
 } // NODEEND
 
+class ParamFixture : public ::testing::TestWithParam<int> {};
+
+TEST_P(ParamFixture, Positive) { // NODE:ParamFixture::Positive,passed
+  EXPECT_GE(GetParam(), 0);
+} // NODEEND
+
+INSTANTIATE_TEST_SUITE_P(First, ParamFixture, ::testing::Values(0, 1));
+INSTANTIATE_TEST_SUITE_P(Second, ParamFixture, ::testing::Values(2));
+
 } // namespace test_two

@@ -97,6 +97,38 @@ describe("adapter spec", function()
     )
   end)
 
+  it("builds filters for all instances of a parameterized test", function()
+    with_mock_executable_for_nodes({ "Fixture::Case" })
+
+    neotest_spec_utils.assert_spec_for_file(
+      [[TEST_P(Fixture, Case) {}]],
+      {
+        input_key = "Fixture::Case",
+        command = {
+          MOCK_EXECUTABLE,
+          "--gtest_filter=*/Fixture.Case/*:Fixture.Case/*",
+        },
+        allow_extra_args = true,
+      }
+    )
+  end)
+
+  it("includes parameterized tests when running a namespace", function()
+    with_mock_executable_for_nodes({ "Fixture" })
+
+    neotest_spec_utils.assert_spec_for_file(
+      [[
+      TEST_F(Fixture, Ordinary) {}
+      TEST_P(Fixture, Case) {}
+      ]],
+      {
+        input_key = "Fixture",
+        command = { MOCK_EXECUTABLE, "--gtest_filter=Fixture.*:*/Fixture.Case/*" },
+        allow_extra_args = true,
+      }
+    )
+  end)
+
   it("builds command for a file with two namespaces", function()
     with_mock_executable_for_nodes({ "TestOne", "TestTwo" })
 

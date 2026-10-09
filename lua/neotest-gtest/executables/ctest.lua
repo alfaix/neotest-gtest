@@ -84,9 +84,17 @@ end
 local function pick_executable(exe2tests, tests, target)
   local best, best_hits = nil, 0
   for exe, known in pairs(exe2tests) do
+    local available = {}
+    for runtime_name in pairs(known) do
+      available[runtime_name] = true
+      local source_name = runtime_name:match("([^/]+%.[^/]+)/[^/]+$")
+      if source_name then
+        available[source_name] = true
+      end
+    end
     local hits = 0
     for _, name in ipairs(tests) do
-      if known[name] then
+      if available[name] then
         hits = hits + 1
       end
     end

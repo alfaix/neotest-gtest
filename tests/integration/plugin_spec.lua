@@ -43,6 +43,22 @@ describe("integration testsuite", function()
     state.ui.notifications:assert_no_other_notifications()
   end)
 
+  it("runs and reports every instance of a parameterized source test", function()
+    setup()
+    local file_id = state:mkid("test_two.cpp")
+    local id = file_id .. "::ParamFixture::Positive"
+    state:configure_executables({ [exe1] = { file_id } })
+    state:run({ args = { id } })
+
+    local results = state._results_recorder:get_aggregated_results()
+    local result = assert(results[id])
+    assert.are.equal("passed", result.status)
+    assert.is_not_nil(result.short:find("First/ParamFixture.Positive/0", 1, true))
+    assert.is_not_nil(result.short:find("First/ParamFixture.Positive/1", 1, true))
+    assert.is_not_nil(result.short:find("Second/ParamFixture.Positive/0", 1, true))
+    state.ui.notifications:assert_no_other_notifications()
+  end)
+
   it("unconfigured run throws an error", function()
     setup()
     local id = state:mkid("test_two.cpp")

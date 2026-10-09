@@ -11,9 +11,9 @@ local function get_filter_for_test_node(node)
   local posid = data.id
   local test_kind = data.extra.kind
   if test_kind == "TEST_P" then
-    -- TODO: figure this out (will have to query executables and do
-    -- best-effort matching, probably)
-    utils.schedule_error("TEST_P is not yet supported, sorry :(")
+    local namespace = node:parent():data().name
+    local test_name = data.name
+    return string.format("*/%s.%s/*:%s.%s/*", namespace, test_name, namespace, test_name)
   else
     local parts = vim.split(posid, "::", { plain = true })
     -- file::namespace::test_name
@@ -30,7 +30,14 @@ local function get_filters_for_nodes(nodes)
     if type == "test" then
       return get_filter_for_test_node(node)
     elseif type == "namespace" then
-      return node:data().name .. ".*"
+      local namespace = node:data().name
+      local filters = { namespace .. ".*" }
+      for _, child in ipairs(node:children()) do
+        if child:data().extra.kind == "TEST_P" then
+          filters[#filters + 1] = "*/" .. namespace .. "." .. child:data().name .. "/*"
+        end
+      end
+      return table.concat(filters, ":")
     else
       utils.schedule_error("unknown node type " .. type)
     end

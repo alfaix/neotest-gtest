@@ -40,6 +40,7 @@ end
 local function filter2testnames(filters)
   local positions = {}
   for _, filter in ipairs(filters) do
+    filter = filter:gsub("^%*/", ""):gsub("/%*$", "")
     local parts = vim.split(filter, ".", { plain = true })
     local namespace = parts[1]
     local test_name = parts[2]
@@ -175,9 +176,16 @@ function AdapterResultSpec:_get_name2path(filters)
   local testnames = filter2testnames(filters)
   local all_name2path = self:_get_all_name2path()
   local name2path = {}
+  local selected = {}
+  for _, testname in ipairs(testnames) do
+    selected[testname] = true
+  end
   for _, testname in ipairs(testnames) do
     assert.is_not_nil(all_name2path[testname])
-    name2path[testname] = all_name2path[testname]
+    local namespace = testname:match("^([^%.]+)%.")
+    if namespace == nil or not selected[namespace] then
+      name2path[testname] = all_name2path[testname]
+    end
   end
   return name2path
 end

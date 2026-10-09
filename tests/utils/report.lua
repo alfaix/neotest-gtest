@@ -68,7 +68,11 @@ function ReportSpec:_assert_matches_summary(summary)
   local lineend = string.find(summary, "\n", 1, true)
   local header = summary:sub(1, lineend - 1)
   local body = summary:sub(lineend + 1)
-  self:_assert_matches_header(header)
+  -- A source TEST_P position can contain several runtime instance summaries.
+  if not (self.summary == "MATCH_ERRORS_ONLY"
+    and header:find("/" .. self.namespace .. "." .. self.name .. "/", 1, true)) then
+    self:_assert_matches_header(header)
+  end
   self:_assert_matches_body(body)
 end
 

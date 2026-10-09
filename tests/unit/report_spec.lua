@@ -273,7 +273,7 @@ describe("report builder", function()
       context = {
         results_path = opts.results_path,
         positions = {},
-        name2path = {
+        name2path = opts.name2path or {
           ["TestOne"] = dirpath .. "/test_one.cpp",
           ["TestOne.Foo"] = dirpath .. "/test_one.cpp",
           ["TestTwo"] = dirpath .. "/test_two.cpp",
@@ -312,6 +312,57 @@ describe("report builder", function()
         summary = "Passed, Time: 0s, Timestamp: " .. TEST_TIMESTAMP,
       },
     })
+  end)
+
+  it("combines parameterized instances at their source position", function()
+    setup()
+    tree = tree_utils.make_directory_tree({
+      ["test_one.cpp"] = "TEST_P(TestOne, Foo) {}",
+    }, dirpath)
+    full_gtest_report.testsuites = {
+      {
+        name = "First/TestOne",
+        testsuite = {
+          make_gtest_report({
+            name = "Foo/0",
+            classname = "First/TestOne",
+            failures = {},
+          }),
+        },
+      },
+      {
+        name = "Second/TestOne",
+        testsuite = {
+          make_gtest_report({
+            name = "Foo/1",
+            classname = "Second/TestOne",
+            failures = { { failure = FILENAME .. ":1\nBroken", type = "" } },
+          }),
+        },
+      },
+      {
+        name = "TestOne",
+        testsuite = {
+          make_gtest_report({
+            name = "Foo/2",
+            classname = "TestOne",
+            failures = {},
+          }),
+        },
+      },
+    }
+    lib.files.write(json_path, vim.json.encode(full_gtest_report))
+
+    local results = make_neotest_results({
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+    })
+    local result = results[dirpath .. "/test_one.cpp::TestOne::Foo"]
+    assert.is_not_nil(result)
+    assert.are.equal("failed", result.status)
+    assert.is_not_nil(result.short:find("First/TestOne.Foo/0", 1, true))
+    assert.is_not_nil(result.short:find("Second/TestOne.Foo/1", 1, true))
+    assert.is_not_nil(result.short:find("TestOne.Foo/2", 1, true))
+    assert.are.equal("Broken", result.errors[1].message)
   end)
 
   it("builder throws error if file does not exist", function()

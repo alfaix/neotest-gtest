@@ -151,6 +151,24 @@ describe("config library", function()
     )
   end)
 
+  it("shows TEST_P as a test position", function()
+    assert_parses_as(
+      [[
+      TEST_P(ParamFixture, Positive) {
+        EXPECT_GE(GetParam(), 0);
+      }
+      ]],
+      {
+        {
+          name = "ParamFixture",
+          children = {
+            { name = "Positive", line_range = { 0, 2 }, kind = "TEST_P" },
+          },
+        },
+      }
+    )
+  end)
+
   it("correctly parses interrupted namespace", function()
     assert_parses_as(
       [[

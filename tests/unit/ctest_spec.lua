@@ -43,6 +43,14 @@ describe("pick_executable", function()
   it("leaves a file whose tests are in no binary unmapped", function()
     assert.is_nil(ctest._pick_executable({ [A] = set({ "S.t1" }) }, { "Other.t" }, "a_tests"))
   end)
+
+  it("matches parameterized instances to their source test", function()
+    local exe2tests = {
+      [A] = set({ "First/Fixture.Case/0", "First/Fixture.Case/1" }),
+      [B] = set({ "Other.Case" }),
+    }
+    assert.equals(A, ctest._pick_executable(exe2tests, { "Fixture.Case" }, nil))
+  end)
 end)
 
 describe("parse_ctest_json", function()
