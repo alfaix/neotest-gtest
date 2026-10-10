@@ -364,6 +364,67 @@ describe("report builder", function()
     assert.same({}, results[source_id .. "::" .. names[1]].errors)
   end)
 
+  it("reports typed cases by their full runtime names", function()
+    setup()
+    local source_file = dirpath .. "/test_one.cpp"
+    local source_id = source_file .. "::TypedFixture::Works"
+    local names = { "TypedFixture/Small.Works", "TypedFixture/Large.Works" }
+    local parse = require("neotest-gtest.parse")
+
+    lib.files.write(source_file, "TYPED_TEST(TypedFixture, Works) {}")
+    tree = parse.parse_positions(source_file, { [source_id] = names })
+    write_parameterized_results({
+      { full_name = names[1] },
+      {
+        full_name = names[2],
+        failures = { { failure = source_file .. ":1\ntyped failure", type = "" } },
+      },
+    })
+
+    local results = make_neotest_results({
+      name2path = { ["TypedFixture.Works"] = source_file },
+      position_ids = { source_id },
+    })
+
+    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
+    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
+    assert.equals("failed", results[source_id].status)
+    assert.equals("typed failure", results[source_id .. "::" .. names[2]].errors[1].message)
+    assert.equals(0, results[source_id .. "::" .. names[2]].errors[1].line)
+  end)
+
+  it("reports type-parameterized cases from separate instantiations", function()
+    setup()
+    local source_file = dirpath .. "/test_one.cpp"
+    local source_id = source_file .. "::PatternFixture::Works"
+    local names = {
+      "First/PatternFixture/0.Works",
+      "Second/PatternFixture/0.Works",
+    }
+    local parse = require("neotest-gtest.parse")
+
+    lib.files.write(source_file, "TYPED_TEST_P(PatternFixture, Works) {}")
+    tree = parse.parse_positions(source_file, { [source_id] = names })
+    write_parameterized_results({
+      { full_name = names[1] },
+      {
+        full_name = names[2],
+        failures = { { failure = source_file .. ":1\ntype pattern failed", type = "" } },
+      },
+    })
+
+    local results = make_neotest_results({
+      name2path = { ["PatternFixture.Works"] = source_file },
+      position_ids = { source_id },
+    })
+
+    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
+    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
+    assert.equals("failed", results[source_id].status)
+    assert.equals("type pattern failed", results[source_id .. "::" .. names[2]].errors[1].message)
+    assert.equals(0, results[source_id .. "::" .. names[2]].errors[1].line)
+  end)
+
   it("fails selected runtime leaves when the JSON report is missing", function()
     setup()
     local name = "First/TestOne.Foo/0"

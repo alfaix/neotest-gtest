@@ -142,6 +142,56 @@ describe("adapter spec", function()
     end
   end)
 
+  it("runs and debugs typed leaves by exact name and runs their source parent", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = file .. "::TypedFixture::Works"
+    local names = { "TypedFixture/Small.Works", "TypedFixture/Large.Works" }
+
+    lib.files.write(file, "TYPED_TEST(TypedFixture, Works) {}")
+
+    local tree = parse.parse_positions(file, { [source_id] = names })
+    local parent = assert(tree:get_key(source_id))
+    local leaf = assert(tree:get_key(source_id .. "::" .. names[1]))
+
+    executables.find_executables = function(node)
+      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
+    end
+
+    local leaf_spec = assert(NeotestAdapter:new({ tree = leaf, strategy = "dap" }):build_specs()[1])
+    local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
+
+    assert.equals("--gtest_filter=" .. names[1], leaf_spec.command[2])
+    assert.equals("--gtest_filter=" .. names[1], leaf_spec.strategy.args[1])
+    assert.equals(file, leaf_spec.context.name2path[names[1]])
+    assert.equals("--gtest_filter=" .. table.concat(names, ":"), parent_spec.command[2])
+  end)
+
+  it("runs type-parameterized leaves by exact name across instantiations", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = file .. "::PatternFixture::Works"
+    local names = {
+      "First/PatternFixture/0.Works",
+      "Second/PatternFixture/0.Works",
+    }
+
+    lib.files.write(file, "TYPED_TEST_P(PatternFixture, Works) {}")
+
+    local tree = parse.parse_positions(file, { [source_id] = names })
+    local parent = assert(tree:get_key(source_id))
+    local leaf = assert(tree:get_key(source_id .. "::" .. names[2]))
+
+    executables.find_executables = function(node)
+      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
+    end
+
+    local leaf_spec = assert(NeotestAdapter:new({ tree = leaf, strategy = "dap" }):build_specs()[1])
+    local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
+
+    assert.equals("--gtest_filter=" .. names[2], leaf_spec.command[2])
+    assert.equals("--gtest_filter=" .. names[2], leaf_spec.strategy.args[1])
+    assert.equals("--gtest_filter=" .. table.concat(names, ":"), parent_spec.command[2])
+  end)
+
   it("keeps parent and file selection over all compiled instances", function()
     local file = assert(vim.fn.tempname()) .. ".cpp"
     local source_id = file .. "::Fixture::Case"

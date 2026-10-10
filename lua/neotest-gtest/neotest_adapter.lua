@@ -13,6 +13,27 @@ local function get_filter_for_test_node(node)
   end
   local posid = data.id
   local test_kind = data.extra.kind
+
+  if test_kind == "TYPED_TEST" or test_kind == "TYPED_TEST_P" then
+    local children = node:children()
+    if #children > 0 then
+      return table.concat(
+        vim.tbl_map(function(child)
+          return child:data().extra.runtime_name
+        end, children),
+        ":"
+      )
+    end
+
+    local namespace = node:parent():data().name
+    local test_name = data.name
+    if test_kind == "TYPED_TEST_P" then
+      return string.format("*/%s/*.%s:%s/*.%s", namespace, test_name, namespace, test_name)
+    end
+
+    return string.format("%s/*.%s", namespace, test_name)
+  end
+
   if test_kind == "TEST_P" then
     local namespace = node:parent():data().name
     local test_name = data.name
@@ -36,9 +57,9 @@ local function get_filters_for_nodes(nodes)
       local namespace = node:data().name
       local filters = { namespace .. ".*" }
       for _, child in ipairs(node:children()) do
-        if child:data().extra.kind == "TEST_P" then
-          filters[#filters + 1] = "*/" .. namespace .. "." .. child:data().name .. "/*"
-          filters[#filters + 1] = namespace .. "." .. child:data().name .. "/*"
+        local kind = child:data().extra.kind
+        if kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P" then
+          filters[#filters + 1] = get_filter_for_test_node(child)
         end
       end
       return table.concat(filters, ":")

@@ -68,7 +68,11 @@ function GTestNeotestAdapter.discover_positions(file_path)
   for _, node in source_tree:iter_nodes() do
     local data = node:data()
 
-    if data.type == "test" and data.extra and data.extra.kind == "TEST_P" then
+    local kind = data.extra and data.extra.kind
+    if
+      data.type == "test"
+      and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
+    then
       local executable = registry:configured_executable_for(data.id)
 
       if executable then

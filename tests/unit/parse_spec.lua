@@ -169,6 +169,62 @@ describe("config library", function()
     )
   end)
 
+  it("shows TYPED_TEST as a source position with exact runtime leaves", function()
+    local fpath = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = fpath .. "::TypedFixture::Works"
+    local runtime_names = { "TypedFixture/Small.Works", "TypedFixture/Large.Works" }
+
+    lib.files.write(
+      fpath,
+      [[
+TYPED_TEST(TypedFixture, Works) {
+  EXPECT_TRUE(true);
+}
+]]
+    )
+
+    local tree = parse_module.parse_positions(fpath, {
+      [source_id] = runtime_names,
+    })
+    local source = assert(tree:get_key(source_id))
+
+    assert.equals("TYPED_TEST", source:data().extra.kind)
+    assert.equals(2, #source:children())
+    for _, name in ipairs(runtime_names) do
+      local leaf = assert(tree:get_key(source_id .. "::" .. name))
+
+      assert.equals(name, leaf:data().extra.runtime_name)
+      assert.equals("TYPED_TEST", leaf:data().extra.kind)
+    end
+  end)
+
+  it("shows TYPED_TEST_P with leaves from multiple instantiations", function()
+    local fpath = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = fpath .. "::PatternFixture::Works"
+    local runtime_names = {
+      "First/PatternFixture/0.Works",
+      "First/PatternFixture/1.Works",
+      "Second/PatternFixture/0.Works",
+    }
+
+    lib.files.write(fpath, "TYPED_TEST_P(PatternFixture, Works) {}")
+
+    local tree = parse_module.parse_positions(fpath, {
+      [source_id] = runtime_names,
+    })
+    local source = assert(tree:get_key(source_id))
+
+    assert.equals("TYPED_TEST_P", source:data().extra.kind)
+    assert.equals(3, #source:children())
+
+    for _, name in ipairs(runtime_names) do
+      local leaf = assert(tree:get_key(source_id .. "::" .. name))
+
+      assert.equals(name, leaf:data().extra.runtime_name)
+      assert.equals("TYPED_TEST_P", leaf:data().extra.kind)
+    end
+  end)
+
   it("adds exact runtime children beneath their source declarations", function()
     local source = [[
       TEST_P(ParamFixture, Positive) {}

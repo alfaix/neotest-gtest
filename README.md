@@ -28,10 +28,19 @@ One major feature is not yet supported:
 - Build tool integration for recompilation - you have to do that manually (or with
   some other plugin) for now
 
-`TEST_P` positions appear once per source test. Running one position runs all of
-its parameter instances, including multiple instantiations. Their results are
-combined at that position; any failed instance marks it failed, and the short
-output includes each instance.
+`TEST_P`, `TYPED_TEST`, and `TYPED_TEST_P` source declarations remain selectable
+parents. After an executable is configured and the file is saved, the summary
+shows each compiled case beneath its source declaration. Select a leaf to run or
+debug its exact Google Test name, or select the parent to run every compiled case
+for that declaration. Buffer-based nearest-test selection chooses the source
+parent. Generated cases report their results independently; a failed case also
+marks its parent failed.
+
+The executable's `--gtest_list_tests` output supplies the runtime names. Rebuild
+and save the source file after changing instantiations or types. Until the save
+refresh, source parents remain available and run as grouped tests. Other
+generated Google Test macro families and per-case process isolation are not yet
+supported.
 
 Contributions are welcome! :)
 

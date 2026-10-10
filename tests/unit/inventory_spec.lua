@@ -63,4 +63,48 @@ Custom/NamedFixture.
 
     assert.same({ "Unknown.Case" }, unmatched)
   end)
+
+  it("maps typed cases with numeric and custom type names", function()
+    local tree = tree_utils.make_directory_tree({
+      ["test_typed.cpp"] = "TYPED_TEST(TypedFixture, Works) {}",
+    })
+    local file = tree:children()[1]:data().path
+
+    local by_source, unmatched = inventory.map_source(tree, {
+      "TypedFixture/0.Works",
+      "TypedFixture/Long.Works",
+      "OtherFixture/0.Works",
+    })
+
+    assert.same({
+      [file .. "::TypedFixture::Works"] = {
+        "TypedFixture/0.Works",
+        "TypedFixture/Long.Works",
+      },
+    }, by_source)
+    assert.same({ "OtherFixture/0.Works" }, unmatched)
+  end)
+
+  it("maps type-parameterized cases from separate instantiations", function()
+    local tree = tree_utils.make_directory_tree({
+      ["test_typed.cpp"] = "TYPED_TEST_P(PatternFixture, Works) {}",
+    })
+    local file = tree:children()[1]:data().path
+
+    local by_source, unmatched = inventory.map_source(tree, {
+      "First/PatternFixture/0.Works",
+      "First/PatternFixture/1.Works",
+      "Second/PatternFixture/0.Works",
+      "Other/PatternFixture/0.Unknown",
+    })
+
+    assert.same({
+      [file .. "::PatternFixture::Works"] = {
+        "First/PatternFixture/0.Works",
+        "First/PatternFixture/1.Works",
+        "Second/PatternFixture/0.Works",
+      },
+    }, by_source)
+    assert.same({ "Other/PatternFixture/0.Unknown" }, unmatched)
+  end)
 end)

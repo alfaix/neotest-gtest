@@ -51,6 +51,24 @@ describe("pick_executable", function()
     }
     assert.equals(A, ctest._pick_executable(exe2tests, { "Fixture.Case" }, nil))
   end)
+
+  it("matches typed runtime suites to their source tests", function()
+    local exe2tests = {
+      [A] = set({ "TypedFixture/Small.Passes", "TypedFixture/Large.Passes" }),
+      [B] = set({ "Other.Case" }),
+    }
+
+    assert.equals(A, ctest._pick_executable(exe2tests, { "TypedFixture.Passes" }, nil))
+  end)
+
+  it("matches type-parameterized instantiations to their source tests", function()
+    local exe2tests = {
+      [A] = set({ "First/PatternFixture/0.Works", "Second/PatternFixture/1.Works" }),
+      [B] = set({ "Other.Case" }),
+    }
+
+    assert.equals(A, ctest._pick_executable(exe2tests, { "PatternFixture.Works" }, nil))
+  end)
 end)
 
 describe("parse_ctest_json", function()

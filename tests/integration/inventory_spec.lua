@@ -223,4 +223,119 @@ describe("compiled Google Test inventory", function()
       assert.equals("passed", results[source_id .. "::" .. names[index]].status)
     end
   end)
+
+  it("discovers and selects every compiled typed case", function()
+    local root = vim.uv.cwd() .. "/tests/integration/cpp"
+    local source = root .. "/src/test_typed.cpp"
+    local executable = root .. "/build/test-typed"
+    local source_id = source .. "::TypedFixture::Passes"
+    local pattern_source_id = source .. "::PatternFixture::Passes"
+    local expected = {
+      "TypedFixture/Small.Passes",
+      "TypedFixture/Small.FailsWhenRequested",
+      "TypedFixture/Large.Passes",
+      "TypedFixture/Large.FailsWhenRequested",
+
+      "First/PatternFixture/0.Passes",
+      "First/PatternFixture/0.FailsWhenRequested",
+      "First/PatternFixture/1.Passes",
+      "First/PatternFixture/1.FailsWhenRequested",
+
+      "Second/PatternFixture/0.Passes",
+      "Second/PatternFixture/0.FailsWhenRequested",
+      "Second/PatternFixture/1.Passes",
+      "Second/PatternFixture/1.FailsWhenRequested",
+    }
+    local registry = GlobalRegistry:for_dir(root)
+
+    old_root = config.root
+    old_lookup = registry.configured_executable_for
+    old_find_executables = executables.find_executables
+    configured_registry = registry
+
+    config.root = function()
+      return root
+    end
+
+    registry.configured_executable_for = function()
+      return executable
+    end
+
+    executables.find_executables = function(node)
+      return { [executable] = { node:data().id } }, {}
+    end
+
+    local names = inventory.list(executable)
+    local mapped, unmatched = inventory.map_source(parse.parse_positions(source), names)
+    local tree = adapter.discover_positions(source)
+    local parent = assert(tree:get_key(source_id))
+    local leaf = assert(tree:get_key(source_id .. "::TypedFixture/Large.Passes"))
+    local pattern_parent = assert(tree:get_key(pattern_source_id))
+    local pattern_leaf =
+      assert(tree:get_key(pattern_source_id .. "::Second/PatternFixture/1.Passes"))
+    local spec = assert(adapter.build_spec({ tree = leaf, strategy = "dap" })[1])
+    local pattern_spec = assert(adapter.build_spec({ tree = pattern_leaf, strategy = "dap" })[1])
+    local code = lib.process.run(spec.command, { stdout = true })
+    local pattern_code = lib.process.run(pattern_spec.command, { stdout = true })
+    local results = adapter.results(spec, { code = code, output = spec.context.results_path }, tree)
+    local pattern_results = adapter.results(
+      pattern_spec,
+      { code = pattern_code, output = pattern_spec.context.results_path },
+      tree
+    )
+
+    assert.same(expected, names)
+    assert.same({}, unmatched)
+    assert.same({ "TypedFixture/Small.Passes", "TypedFixture/Large.Passes" }, mapped[source_id])
+    assert.same({
+      "First/PatternFixture/0.Passes",
+      "First/PatternFixture/1.Passes",
+      "Second/PatternFixture/0.Passes",
+      "Second/PatternFixture/1.Passes",
+    }, mapped[pattern_source_id])
+    assert.equals(2, #parent:children())
+    assert.equals(4, #pattern_parent:children())
+    assert.equals("--gtest_filter=TypedFixture/Large.Passes", spec.command[2])
+    assert.equals("--gtest_filter=TypedFixture/Large.Passes", spec.strategy.args[1])
+    assert.equals("passed", results[leaf:data().id].status)
+    assert.equals("--gtest_filter=Second/PatternFixture/1.Passes", pattern_spec.command[2])
+    assert.equals("--gtest_filter=Second/PatternFixture/1.Passes", pattern_spec.strategy.args[1])
+    assert.equals("passed", pattern_results[pattern_leaf:data().id].status)
+
+    for _, name in ipairs(expected) do
+      local suite, test_name = name:match("^([^%.]+)%.([^%.]+)$")
+      local source_suite = suite:match("([^/]+)/[^/]+$")
+      local leaf_id = source .. "::" .. source_suite .. "::" .. test_name .. "::" .. name
+      local runtime_leaf = assert(tree:get_key(leaf_id))
+      local runtime_spec = assert(adapter.build_spec({ tree = runtime_leaf })[1])
+
+      assert.equals(executable, runtime_spec.command[1])
+      assert.equals("--gtest_filter=" .. name, runtime_spec.command[2])
+      assert.equals(source, runtime_spec.context.name2path[name])
+    end
+
+    local ctest_code, ctest_output = lib.process.run(
+      { "ctest", "--test-dir", root .. "/build", "--show-only=json-v1" },
+      { stdout = true }
+    )
+    local ctest_filters = {}
+
+    for _, test in ipairs(vim.json.decode(ctest_output.stdout).tests) do
+      if test.command[1] == executable then
+        for _, arg in ipairs(test.command) do
+          local filter = arg:match("^%-%-gtest_filter=(.*)$")
+
+          if filter then
+            ctest_filters[filter] = true
+          end
+        end
+      end
+    end
+
+    assert.equals(0, ctest_code)
+
+    for _, name in ipairs(expected) do
+      assert.is_true(ctest_filters[name])
+    end
+  end)
 end)

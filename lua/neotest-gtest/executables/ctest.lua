@@ -91,6 +91,11 @@ local function pick_executable(exe2tests, tests, target)
       if source_name then
         available[source_name] = true
       end
+
+      local typed_suite, typed_test = runtime_name:match("([^/]+)/[^/]+%.([^/]+)$")
+      if typed_suite then
+        available[typed_suite .. "." .. typed_test] = true
+      end
     end
     local hits = 0
     for _, name in ipairs(tests) do

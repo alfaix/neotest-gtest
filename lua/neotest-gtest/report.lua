@@ -223,16 +223,13 @@ function ReportConverter:make_neotest_results()
         local runtime_name = testsuite.name .. "." .. test.name
         local runtime_id = id .. "::" .. runtime_name
         local runtime_node = self._tree:get_key(runtime_id)
+        local kind = node:data().extra and node:data().extra.kind
+        local is_generated = kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
 
         if runtime_node then
           results[runtime_id] = Report:new(test, runtime_node)
             :to_neotest_report(self._result.output)
-        elseif
-          self._spec.context.position_ids
-          and node:data().extra
-          and node:data().extra.kind == "TEST_P"
-          and #node:children() > 0
-        then
+        elseif self._spec.context.position_ids and is_generated and #node:children() > 0 then
           unknown[#unknown + 1] = runtime_name
           result.status = "failed"
           result.short = result.short .. "\nRuntime case has no position: " .. runtime_name
@@ -379,12 +376,15 @@ function ReportConverter:_find_node_by_name(namespace, name)
     fpath = ctx.name2path[namespace .. "." .. name]
   end
 
-  if fpath == nil or name:find("/", 1, true) then
+  if name:find("/", 1, true) then
     source_namespace = namespace:match(".*/([^/]+)$") or namespace
     source_name = name:match("^([^/]+)/[^/]+$") or name
-    fpath = fpath
-      or ctx.name2path[source_namespace .. "." .. source_name]
-      or ctx.name2path[source_namespace]
+  elseif namespace:find("/", 1, true) then
+    source_namespace = namespace:match("([^/]+)/[^/]+$") or namespace
+  end
+
+  if fpath == nil then
+    fpath = ctx.name2path[source_namespace .. "." .. source_name] or ctx.name2path[source_namespace]
   end
 
   if fpath == nil then
@@ -394,7 +394,8 @@ function ReportConverter:_find_node_by_name(namespace, name)
   local node_id = table.concat({ fpath, source_namespace, source_name }, "::")
   local node = self._tree:get_key(node_id)
   if source_namespace ~= namespace or source_name ~= name then
-    if node == nil or node:data().extra.kind ~= "TEST_P" then
+    local kind = node and node:data().extra and node:data().extra.kind
+    if kind ~= "TEST_P" and kind ~= "TYPED_TEST" and kind ~= "TYPED_TEST_P" then
       return nil
     end
   end

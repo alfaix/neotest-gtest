@@ -35,7 +35,7 @@ function M.parse_list(output)
   return names
 end
 
----Group runtime parameterized cases by their source TEST_P declaration.
+---Group generated cases by their source declaration.
 ---@param tree neotest.Tree
 ---@param names string[]
 ---@return table<string, string[]>, string[]
@@ -46,12 +46,16 @@ function M.map_source(tree, names)
   for _, node in tree:iter_nodes() do
     local data = node:data()
 
-    if data.type == "test" and data.extra and data.extra.kind == "TEST_P" then
+    local kind = data.extra and data.extra.kind
+    if
+      data.type == "test"
+      and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
+    then
       by_source[data.id] = {}
 
       local source_name = node:parent():data().name .. "." .. data.name
       sources_by_name[source_name] = sources_by_name[source_name] or {}
-      table.insert(sources_by_name[source_name], data.id)
+      table.insert(sources_by_name[source_name], { id = data.id, kind = kind })
     end
   end
 
@@ -60,17 +64,32 @@ function M.map_source(tree, names)
   for _, runtime_name in ipairs(names) do
     local suite, test = runtime_name:match("^([^%.]+)%.([^%.]+)$")
     local source_name
+    local kind
 
     if suite and test and test:find("/", 1, true) then
       source_name = (suite:match("([^/]+)$") or suite) .. "." .. test:match("^([^/]+)")
+      kind = "TEST_P"
+    elseif suite and test then
+      local fixture = suite:match("([^/]+)/[^/]+$")
+      source_name = fixture and fixture .. "." .. test
     end
 
-    local ids = source_name and sources_by_name[source_name]
+    local sources = source_name and sources_by_name[source_name]
+    local ids = {}
 
-    if ids == nil then
+    for _, source in ipairs(sources or {}) do
+      local matches_value_parameter = kind == "TEST_P" and source.kind == kind
+      local matches_type_parameter = kind == nil and source.kind ~= "TEST_P"
+
+      if matches_value_parameter or matches_type_parameter then
+        ids[#ids + 1] = source.id
+      end
+    end
+
+    if #ids == 0 then
       unmatched[#unmatched + 1] = runtime_name
     else
-      assert(#ids == 1, "ambiguous TEST_P source for " .. runtime_name)
+      assert(#ids == 1, "ambiguous generated source for " .. runtime_name)
       table.insert(by_source[ids[1]], runtime_name)
     end
   end

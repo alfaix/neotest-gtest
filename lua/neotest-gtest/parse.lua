@@ -17,14 +17,14 @@ local injections_text = nil
 -- (and with proper compiler flags the CPP code should also compile which should
 --  mean that treesitter should continue to parse these as function definitions)
 -- Thus, we match all function definitions that meet ALL of the following criteria:
--- * Named TEST/TEST_F/TEST_P (#any-of)
+-- * Named TEST/TEST_F/TEST_P/TYPED_TEST/TYPED_TEST_P (#any-of)
 -- * Do not declare a return type (!type)
 -- * Only have two parameters (. anchors)
 -- * Both parameters are unnamed (!declarator)
 -- * Both parameters' type is a simple type_identifier, i.e., no references
 --   or cv-qualifiers or templates (type: (type_identifier))
 -- The first parameter is the test suite, the second one is the test case
--- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
+-- The name of the "function" is the test kind.
 local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
   "cpp",
   [[
@@ -40,7 +40,7 @@ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
       )
       !type
   )
-  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P"))
+  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P" "TYPED_TEST" "TYPED_TEST_P"))
   @test.definition
 ]]
 )
@@ -137,7 +137,11 @@ end
 -- level is {parent, children...}
 -- Each child is in turn also a level
 -- Thus, {a, {b, {c}}, {d}, {e, {f}, {g}}} represents a(b(c))(d)(e(f,g))
--- Runtime TEST_P cases form a fourth level below their source declaration.
+-- Generated runtime cases form a fourth level below their source declaration.
+
+local function is_generated_kind(kind)
+  return kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
+end
 
 ---Builds a tree from a list of namespaces and tests extracted from
 ---the file represented by `fileobj`.
@@ -170,7 +174,7 @@ local function build_tree(fileobj, namespaces, tests, runtime_by_source)
     }
     testobj.id = position_id(testobj, { namespace[1] })
     local source = testobj
-    if test.kind == "TEST_P" and runtime_by_source and runtime_by_source[testobj.id] then
+    if is_generated_kind(test.kind) and runtime_by_source and runtime_by_source[testobj.id] then
       source = { testobj }
       for _, runtime_name in ipairs(runtime_by_source[testobj.id]) do
         source[#source + 1] = {
@@ -179,7 +183,7 @@ local function build_tree(fileobj, namespaces, tests, runtime_by_source)
           path = fileobj.path,
           name = runtime_name,
           range = test.range,
-          extra = { kind = "TEST_P", runtime_name = runtime_name },
+          extra = { kind = test.kind, runtime_name = runtime_name },
         }
       end
     end
