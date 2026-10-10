@@ -9,15 +9,25 @@ local state
 local exe1
 local exe2
 local exe3
+local exe4
 local root_id
 
 local function setup()
   controller.setup()
   state = controller.state
 
+  for _ = 1, 100 do
+    if neotest.state.positions(state.adapter_id) then
+      break
+    end
+
+    nio.sleep(20)
+  end
+
   exe1 = state.cpp_root .. "/build/test-executable"
   exe2 = state.cpp_root .. "/build/test-executable2"
   exe3 = state.cpp_root .. "/build/test-typed"
+  exe4 = state.cpp_root .. "/build/test-isolation"
   root_id = state.cpp_root .. "/src"
 end
 
@@ -35,6 +45,91 @@ describe("integration testsuite", function()
     local tree = neotest.state.positions(state.adapter_id)
     assert.are.same(neotest.state.adapter_ids(), { state.adapter_id })
     assert.is_not_nil(tree)
+  end)
+
+  it("isolates cases and reports later cases after a child crashes", function()
+    setup()
+
+    local file_id = state:mkid("test_isolation.cpp")
+    local prefix = file_id .. "::Isolation::"
+    local config = require("neotest-gtest.config")
+    local old_isolation = config.process_isolation
+
+    state:configure_executables({ [exe4] = { file_id } })
+    state:run({ args = { file_id } })
+
+    local grouped = state._results_recorder:get_aggregated_results()
+    assert.equals("failed", assert(grouped[prefix .. "BObserveFreshState"]).status)
+    assert.equals("passed", assert(grouped[prefix .. "EAfterCrash"]).status)
+
+    state._results_recorder:reset()
+    state._specs_recorder:reset()
+
+    nio.scheduler()
+    config.process_isolation = true
+    vim.env.NEOTEST_GTEST_ISOLATION_FAILURE = "1"
+    vim.env.NEOTEST_GTEST_ISOLATION_CRASH = "1"
+
+    state:run({ args = { file_id } })
+
+    local specs = state._specs_recorder:await_specs()
+    local isolated = state._results_recorder:get_aggregated_results()
+
+    nio.scheduler()
+    config.process_isolation = old_isolation
+    vim.env.NEOTEST_GTEST_ISOLATION_FAILURE = nil
+    vim.env.NEOTEST_GTEST_ISOLATION_CRASH = nil
+
+    assert.equals(1, #specs)
+    assert.equals(5, #specs[1].context.isolated_cases)
+    assert.equals("passed", assert(isolated[prefix .. "AWriteState"]).status)
+    assert.equals("passed", assert(isolated[prefix .. "BObserveFreshState"]).status)
+    assert.equals("failed", assert(isolated[prefix .. "CFail"]).status)
+    assert.matches("isolated assertion failed", isolated[prefix .. "CFail"].short, 1, true)
+    assert.equals("failed", assert(isolated[prefix .. "DCrash"]).status)
+    assert.equals("passed", assert(isolated[prefix .. "EAfterCrash"]).status)
+
+    local published = state._client:get_results(state.adapter_id)
+    assert.equals("failed", assert(published[file_id .. "::Isolation"]).status)
+    assert.equals("failed", assert(published[file_id]).status)
+  end)
+
+  it("runs parameterized runtime leaves separately through a per-run override", function()
+    setup()
+
+    local file_id = state:mkid("test_two.cpp")
+    local source_id = file_id .. "::ParamFixture::Positive"
+    state:configure_executables({ [exe1] = { file_id } })
+
+    nio.scheduler()
+    vim.cmd.edit(file_id)
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = 0 })
+
+    local positions
+    for _ = 1, 100 do
+      positions = neotest.state.positions(state.adapter_id)
+
+      if positions and positions:get_key(source_id .. "::First/ParamFixture.Positive/0") then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    assert.is_not_nil(positions:get_key(source_id .. "::First/ParamFixture.Positive/0"))
+
+    state:run({ args = { source_id, process_isolation = true } })
+
+    local specs = state._specs_recorder:await_specs()
+    local results = state._results_recorder:get_aggregated_results()
+    local published = state._client:get_results(state.adapter_id)
+
+    assert.equals(1, #specs)
+    assert.equals(3, #specs[1].context.isolated_cases)
+    assert.equals("passed", assert(results[source_id .. "::First/ParamFixture.Positive/0"]).status)
+    assert.equals("passed", assert(results[source_id .. "::First/ParamFixture.Positive/1"]).status)
+    assert.equals("passed", assert(results[source_id .. "::Second/ParamFixture.Positive/0"]).status)
+    assert.equals("passed", assert(published[source_id]).status)
   end)
 
   it("configure and run subtree", function()
@@ -416,15 +511,17 @@ describe("with configured tree", function()
       state:mkid("test_two.cpp"),
       state:mkid("test_one.cpp"),
       state:mkid("test_typed.cpp"),
+      state:mkid("test_isolation.cpp"),
     }
     state:configure_executables({ [exe1] = { root_id } })
     state:configure_executables({ [exe2] = { all_ids[1] } })
     state:configure_executables({ [exe3] = { all_ids[4] } })
+    state:configure_executables({ [exe4] = { all_ids[5] } })
   end
 
   it("configure whole tree and then subtree + run whole tree", function()
     with_configured_tree()
-    state:run({ args = { root_id }, expected_specs = 3 })
+    state:run({ args = { root_id }, expected_specs = 4 })
     state._specs_recorder:await_specs()
     state:assert_results_published(all_ids)
     state.ui.notifications:assert_no_other_notifications()
@@ -446,23 +543,29 @@ describe("configure all", function()
     -- Setup and run configure_all to map all files to their executables.
     --
     setup()
-    local one, two, three, typed =
+    local one, two, three, typed, isolation =
       state:mkid("test_one.cpp"),
       state:mkid("test_two.cpp"),
       state:mkid("subdirectory/test_three.cpp"),
-      state:mkid("test_typed.cpp")
-    state:verify_unconfigured({ one, two, three, typed })
+      state:mkid("test_typed.cpp"),
+      state:mkid("test_isolation.cpp")
+    state:verify_unconfigured({ one, two, three, typed, isolation })
     ctest.configure_all().wait()
-    state:verify_configured({ [exe1] = { one, two }, [exe2] = { three }, [exe3] = { typed } })
-    state.ui.notifications:assert_notified("mapped 4 files", vim.log.levels.INFO)
+    state:verify_configured({
+      [exe1] = { one, two },
+      [exe2] = { three },
+      [exe3] = { typed },
+      [exe4] = { isolation },
+    })
+    state.ui.notifications:assert_notified("mapped 5 files", vim.log.levels.INFO)
     state.ui.notifications:assert_no_other_notifications()
 
     --
     -- Run all tests and verify that they are executed successfully.
     --
-    state:run({ args = { root_id }, expected_specs = 3 })
+    state:run({ args = { root_id }, expected_specs = 4 })
     state._specs_recorder:await_specs()
-    state:assert_results_published({ one, two, three, typed })
+    state:assert_results_published({ one, two, three, typed, isolation })
   end)
 
   it("runs the mapped files and warns about the unmapped ones", function()

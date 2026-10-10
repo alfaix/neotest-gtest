@@ -217,6 +217,74 @@ describe("adapter spec", function()
     assert.equals("--gtest_filter=Fixture.*:*/Fixture.Case/*:Fixture.Case/*", file_spec.command[2])
   end)
 
+  it("builds one isolated process for each compiled case with distinct reports", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    local source_id = file .. "::Fixture::Case"
+    local names = { "First/Fixture.Case/0", "First/Fixture.Case/1" }
+
+    lib.files.write(
+      file,
+      [[
+      TEST(Other, Plain) {}
+      TEST_P(Fixture, Case) {}
+    ]]
+    )
+
+    local tree = parse.parse_positions(file, { [source_id] = names })
+
+    executables.find_executables = function(node)
+      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
+    end
+
+    local grouped = NeotestAdapter:new({ tree = tree }):build_specs()
+    local isolated = NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
+
+    assert.equals(1, #grouped)
+    assert.equals(1, #isolated)
+    assert.is_function(isolated[1].strategy)
+
+    local cases = isolated[1].context.isolated_cases
+    assert.equals(3, #cases)
+
+    local filters = {}
+    local reports = {}
+    local report_dirs = {}
+    for _, case in ipairs(cases) do
+      assert.equals(MOCK_EXECUTABLE, case.command[1])
+      assert.equals(1, #case.context.position_ids)
+
+      filters[case.command[2]] = true
+      reports[case.context.results_path] = true
+      report_dirs[vim.fn.fnamemodify(case.context.results_path, ":h")] = true
+    end
+
+    assert.same({
+      ["--gtest_filter=Other.Plain"] = true,
+      ["--gtest_filter=First/Fixture.Case/0"] = true,
+      ["--gtest_filter=First/Fixture.Case/1"] = true,
+    }, filters)
+    assert.equals(3, vim.tbl_count(reports))
+    assert.equals(1, vim.tbl_count(report_dirs))
+  end)
+
+  it("requires a refreshed runtime inventory for isolated generated cases", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    lib.files.write(file, "TEST_P(Fixture, Case) {}")
+
+    local tree = parse.parse_positions(file)
+
+    executables.find_executables = function(node)
+      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
+    end
+
+    local ok, err = pcall(function()
+      NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
+    end)
+
+    assert.is_false(ok)
+    assert.matches("Process isolation requires compiled case inventory", err, 1, true)
+  end)
+
   it("rejects one spec that maps the same runtime name to two source files", function()
     local first_file = assert(vim.fn.tempname()) .. ".cpp"
     local second_file = assert(vim.fn.tempname()) .. ".cpp"

@@ -157,6 +157,7 @@ end
 ---@field _extra_args string
 ---@field _strategy_name string
 ---@field _output_counter integer
+---@field _process_isolation boolean
 local NeotestAdapter = {}
 ---Creates a new NeotestAdapter, which is responsible for creating neotest run
 ---specs
@@ -168,6 +169,8 @@ function NeotestAdapter:new(args)
     _extra_args = args.extra_args,
     _strategy_name = args.strategy,
     _output_counter = 0,
+    _process_isolation = args.process_isolation == nil and config.process_isolation
+      or args.process_isolation,
   }
   setmetatable(adapter, self)
   self.__index = self
@@ -180,12 +183,77 @@ end
 function NeotestAdapter:build_specs()
   local executable2nodes = self:_try_group_nodes_by_executable()
 
+  if self._process_isolation and self._strategy_name ~= "dap" then
+    return self:_build_isolated_specs(executable2nodes)
+  end
+
   local specs = {}
   for executable, nodes in pairs(executable2nodes) do
     local spec = self:_build_spec_for_executable(executable, nodes)
     specs[#specs + 1] = spec
   end
   return specs
+end
+
+---@param executable2nodes table<string, neotest.Tree[]>
+---@return neotest.RunSpec[]
+function NeotestAdapter:_build_isolated_specs(executable2nodes)
+  local cases = {}
+  local seen = {}
+  local results_dir
+
+  local function add_cases(executable, node)
+    local data = node:data()
+
+    if data.type == "test" then
+      local children = node:children()
+      local kind = data.extra and data.extra.kind
+      local generated = kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
+
+      if generated and #children == 0 and not (data.extra and data.extra.runtime_name) then
+        error("Process isolation requires compiled case inventory for " .. data.id)
+      end
+
+      if #children == 0 then
+        if not seen[data.id] then
+          seen[data.id] = true
+          results_dir = results_dir
+            or utils.new_results_dir({
+              history_size = config.history_size,
+            })
+          cases[#cases + 1] = self:_build_spec_for_executable(executable, { node }, results_dir)
+        end
+        return
+      end
+    end
+
+    for _, child in ipairs(node:children()) do
+      add_cases(executable, child)
+    end
+  end
+
+  for executable, nodes in pairs(executable2nodes) do
+    for _, node in ipairs(nodes) do
+      add_cases(executable, node)
+    end
+  end
+
+  if #cases == 0 then
+    return {}
+  end
+
+  table.sort(cases, function(left, right)
+    return left.context.position_ids[1] < right.context.position_ids[1]
+  end)
+
+  return {
+    {
+      cwd = utils.normalized_root(vim.loop.cwd()),
+      command = cases[1].command,
+      context = { isolated_cases = cases },
+      strategy = require("neotest-gtest.isolation").strategy,
+    },
+  }
 end
 
 ---@return table<string, neotest.Tree> executable2nodes
@@ -216,14 +284,17 @@ end
 
 ---@param executable string
 ---@param nodes neotest.Tree[]
+---@param results_dir? string
 ---@return neotest.RunSpec
 ---@private
-function NeotestAdapter:_build_spec_for_executable(executable, nodes)
+function NeotestAdapter:_build_spec_for_executable(executable, nodes, results_dir)
   nodes = get_filterable_nodes(nodes)
   local filters = get_filters_for_nodes(nodes)
-  local results_path = utils.new_results_dir({
+  results_dir = results_dir or utils.new_results_dir({
     history_size = config.history_size,
-  }) .. "/test_result_" .. self._output_counter .. ".json"
+  })
+  local results_path = results_dir .. "/test_result_" .. self._output_counter .. ".json"
+  self._output_counter = self._output_counter + 1
 
   local command = vim
     .iter({

@@ -43,6 +43,20 @@ end
 ---@param tree neotest.Tree
 ---@return table<string, neotest.Result>
 function GTestNeotestAdapter.results(spec, result, tree)
+  if spec.context and spec.context.isolated_cases then
+    local merged = {}
+
+    for _, case in ipairs(spec.context.isolated_cases) do
+      local process_result = case.process_result or { code = result.code, output = result.output }
+      local case_results = Report.converter:new(case, process_result, tree):make_neotest_results()
+      local id = case.context.position_ids[1]
+
+      merged[id] = assert(case_results[id], "Missing isolated result for " .. id)
+    end
+
+    return merged
+  end
+
   local converter = Report.converter:new(spec, result, tree)
   return converter:make_neotest_results()
 end

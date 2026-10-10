@@ -39,8 +39,19 @@ marks its parent failed.
 The executable's `--gtest_list_tests` output supplies the runtime names. Rebuild
 and save the source file after changing instantiations or types. Until the save
 refresh, source parents remain available and run as grouped tests. Other
-generated Google Test macro families and per-case process isolation are not yet
-supported.
+generated Google Test macro families are not yet supported.
+
+To run each compiled case in a separate process, set `process_isolation = true`
+in the adapter setup. This applies to normal runs; DAP runs keep their normal
+debugging behavior. The default is `false`, so a selection runs grouped by
+executable. Isolated runs start one process per case, which costs more time for
+large selections but prevents process-local state and a crashed case from
+affecting later cases. Each case uses an exact Google Test filter and its own
+JSON report. Generated cases require a configured executable and a refreshed
+runtime inventory; rebuild and save the source file before an isolated run.
+
+You can override the setting for one run with
+`require("neotest").run.run({ process_isolation = true })`.
 
 Contributions are welcome! :)
 
@@ -125,6 +136,8 @@ require("neotest-gtest").setup({
   end,
   -- How many old test results to keep on disk (stored in stdpath('data')/neotest-gtest/runs)
   history_size = 3,
+  -- Run one compiled case per process for normal runs (slower on large selections).
+  process_isolation = false,
   -- To prevent large projects from freezing your computer, there's some throttling
   -- for -- parsing test files. Decrease if your parsing is slow and you have a
   -- monster PC.

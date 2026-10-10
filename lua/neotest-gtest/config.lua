@@ -46,6 +46,7 @@ local default_config = {
   debug_adapter = "codelldb",
   is_test_file = is_test_file,
   history_size = 3,
+  process_isolation = false,
   parsing_throttle_ms = 10,
   mappings = { configure = nil },
   summary_view = {

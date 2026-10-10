@@ -186,5 +186,6 @@ function M.setup()
 
   -- call any function to trigger ensure_started()
   client:get_adapters()
+  M.state._client = client
 end
 return M

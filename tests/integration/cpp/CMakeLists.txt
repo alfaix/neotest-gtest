@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(test-executable src/test_one.cpp src/test_two.cpp)
 add_executable(test-executable2 src/subdirectory/test_three.cpp)
 add_executable(test-typed src/test_typed.cpp)
+add_executable(test-isolation src/test_isolation.cpp)
 
 add_executable(test-inventory fixtures/param_inventory.cpp)
 
@@ -51,6 +52,7 @@ endif()
 target_link_libraries(test-executable ${GTEST_TARGET})
 target_link_libraries(test-executable2 ${GTEST_TARGET})
 target_link_libraries(test-typed ${GTEST_TARGET})
+target_link_libraries(test-isolation ${GTEST_TARGET})
 
 target_link_libraries(test-inventory ${GTEST_TARGET})
 
@@ -58,5 +60,6 @@ include(GoogleTest)
 gtest_discover_tests(test-executable)
 gtest_discover_tests(test-executable2)
 gtest_discover_tests(test-typed)
+gtest_discover_tests(test-isolation)
 
 gtest_discover_tests(test-inventory)
