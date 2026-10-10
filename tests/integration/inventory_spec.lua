@@ -175,4 +175,52 @@ describe("compiled Google Test inventory", function()
       assert.is_true(ctest_filters[name])
     end
   end)
+
+  it("keeps a failed compiled instance separate from its passing siblings", function()
+    local root = vim.uv.cwd() .. "/tests/integration/cpp"
+    local source = root .. "/fixtures/param_inventory.cpp"
+    local executable = root .. "/build/test-inventory"
+    local source_id = source .. "::PairFixture::Combined"
+    local names = {
+      "Pairs/PairFixture.Combined/0",
+      "Pairs/PairFixture.Combined/1",
+      "Pairs/PairFixture.Combined/2",
+      "Pairs/PairFixture.Combined/3",
+    }
+    local tree = parse.parse_positions(source, { [source_id] = names })
+
+    local results_path = vim.fn.tempname() .. ".json"
+    local spec = {
+      command = {
+        executable,
+        "--gtest_filter=Pairs/PairFixture.Combined/*",
+        "--gtest_output=json:" .. results_path,
+      },
+      context = {
+        results_path = results_path,
+        name2path = { ["PairFixture.Combined"] = source },
+        position_ids = { source_id },
+      },
+    }
+
+    local code, process_result = lib.process.run(spec.command, { stdout = true })
+    local results = adapter.results(spec, {
+      code = code,
+      output = process_result.stdout,
+    }, tree)
+
+    assert.equals(1, code)
+    assert.equals("failed", results[source_id].status)
+    assert.equals("failed", results[source_id .. "::" .. names[4]].status)
+    assert.matches(
+      "expected only one pair to fail",
+      results[source_id .. "::" .. names[4]].short,
+      1,
+      true
+    )
+
+    for _, index in ipairs({ 1, 2, 3 }) do
+      assert.equals("passed", results[source_id .. "::" .. names[index]].status)
+    end
+  end)
 end)

@@ -168,6 +168,9 @@ function AdapterResultSpec:_check_context_matches_command(context, command)
 
   assert.is_not_nil(results_path)
   assert.is_not_nil(context.name2path)
+  assert.is_not_nil(context.position_ids)
+
+  context.position_ids = nil
   assert.are.same({ results_path = results_path, name2path = expected_name2path }, context)
 end
 

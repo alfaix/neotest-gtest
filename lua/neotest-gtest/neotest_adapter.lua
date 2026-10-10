@@ -223,6 +223,9 @@ function NeotestAdapter:_build_spec_for_executable(executable, nodes)
     context = {
       results_path = results_path,
       name2path = self:_map_names_to_paths(nodes),
+      position_ids = vim.tbl_map(function(node)
+        return node:data().id
+      end, nodes),
     },
     strategy = self:_make_strategy_for_command(command),
   }
@@ -233,22 +236,41 @@ end
 ---@private
 function NeotestAdapter:_map_names_to_paths(nodes)
   local name2path = {}
+  local function map_name(name, path, strict)
+    if strict then
+      assert(
+        name2path[name] == nil or name2path[name] == path,
+        "Conflicting executable mappings for " .. name
+      )
+    end
+    name2path[name] = path
+  end
+  local function map_runtime(node)
+    for _, child in ipairs(node:children()) do
+      if child:data().extra and child:data().extra.runtime_name then
+        map_name(child:data().extra.runtime_name, child:data().path, true)
+      end
+      map_runtime(child)
+    end
+  end
   for _, node in ipairs(nodes) do
     local data = node:data()
     if data.type == "test" then
       if data.extra and data.extra.runtime_name then
         local source = node:parent()
         local ns_name = source:parent():data().name
-        name2path[ns_name .. "." .. source:data().name] = data.path
+        map_name(ns_name .. "." .. source:data().name, data.path)
+        map_name(data.extra.runtime_name, data.path, true)
       else
         local ns_name = node:parent():data().name
-        name2path[ns_name .. "." .. data.name] = data.path
+        map_name(ns_name .. "." .. data.name, data.path)
       end
     elseif data.type == "namespace" then
-      name2path[data.name] = data.path
+      map_name(data.name, data.path)
     else
       utils.schedule_error("unknown node type " .. type)
     end
+    map_runtime(node)
   end
   return name2path
 end

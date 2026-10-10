@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <vector>
 
 namespace test_two {
@@ -39,6 +40,10 @@ class ParamFixture : public ::testing::TestWithParam<int> {};
 
 TEST_P(ParamFixture, Positive) { // NODE:ParamFixture::Positive,passed
   EXPECT_GE(GetParam(), 0);
+
+  if (std::getenv("NEOTEST_GTEST_FAIL_PARAM") && GetParam() == 1) {
+    FAIL() << "selected parameter failed";
+  }
 } // NODEEND
 
 TEST_P(ParamFixture, Small) { // NODE:ParamFixture::Small,passed

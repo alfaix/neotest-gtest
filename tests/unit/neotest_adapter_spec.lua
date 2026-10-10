@@ -132,6 +132,8 @@ describe("adapter spec", function()
 
       assert.equals("--gtest_filter=" .. runtime_name, spec.command[2])
       assert.equals(MOCK_EXECUTABLE, spec.command[1])
+      assert.equals(file, spec.context.name2path[runtime_name])
+      assert.same({ leaf:data().id }, spec.context.position_ids)
 
       if strategy == "dap" then
         assert.equals(MOCK_EXECUTABLE, spec.strategy.program)
@@ -158,8 +160,32 @@ describe("adapter spec", function()
     local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
     local file_spec = assert(NeotestAdapter:new({ tree = tree }):build_specs()[1])
 
+    assert.equals(file, parent_spec.context.name2path["First/Fixture.Case/0"])
+    assert.equals(file, file_spec.context.name2path["Second/Fixture.Case/Custom"])
+
     assert.equals("--gtest_filter=*/Fixture.Case/*:Fixture.Case/*", parent_spec.command[2])
     assert.equals("--gtest_filter=Fixture.*:*/Fixture.Case/*:Fixture.Case/*", file_spec.command[2])
+  end)
+
+  it("rejects one spec that maps the same runtime name to two source files", function()
+    local first_file = assert(vim.fn.tempname()) .. ".cpp"
+    local second_file = assert(vim.fn.tempname()) .. ".cpp"
+    local runtime_name = "Same/Fixture.Case/0"
+    lib.files.write(first_file, "TEST_P(Fixture, Case) {}")
+    lib.files.write(second_file, "TEST_P(Fixture, Case) {}")
+
+    local first_source = first_file .. "::Fixture::Case"
+    local second_source = second_file .. "::Fixture::Case"
+    local first_tree = parse.parse_positions(first_file, { [first_source] = { runtime_name } })
+    local second_tree = parse.parse_positions(second_file, { [second_source] = { runtime_name } })
+    local adapter = NeotestAdapter:new({ tree = first_tree })
+
+    assert.has_error(function()
+      adapter:_map_names_to_paths({
+        assert(first_tree:get_key(first_source)),
+        assert(second_tree:get_key(second_source)),
+      })
+    end, "Conflicting executable mappings for " .. runtime_name)
   end)
 
   it("includes parameterized tests when running a namespace", function()

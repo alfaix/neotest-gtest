@@ -7,6 +7,8 @@ class PairFixture : public ::testing::TestWithParam<std::tuple<int, bool>> {};
 
 TEST_P(PairFixture, Combined) {
   EXPECT_GE(std::get<0>(GetParam()), 1);
+  EXPECT_FALSE(std::get<0>(GetParam()) == 2 && std::get<1>(GetParam()))
+      << "expected only one pair to fail";
 }
 
 INSTANTIATE_TEST_SUITE_P(Pairs, PairFixture,

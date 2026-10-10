@@ -156,6 +156,29 @@ describe("integration testsuite", function()
     state._specs_recorder:reset()
     state._results_recorder:reset()
 
+    nio.scheduler()
+    vim.env.NEOTEST_GTEST_FAIL_PARAM = "1"
+    state:run({ args = { source_id } })
+    local failing_results = state._results_recorder:get_aggregated_results()
+
+    nio.scheduler()
+    vim.env.NEOTEST_GTEST_FAIL_PARAM = nil
+
+    assert.equals("failed", assert(failing_results[source_id]).status)
+    assert.equals("failed", assert(failing_results[leaf_id]).status)
+    assert.matches("selected parameter failed", failing_results[leaf_id].short, 1, true)
+    assert.equals(
+      "passed",
+      assert(failing_results[source_id .. "::First/ParamFixture.Positive/0"]).status
+    )
+    assert.equals(
+      "passed",
+      assert(failing_results[source_id .. "::Second/ParamFixture.Positive/0"]).status
+    )
+
+    state._specs_recorder:reset()
+    state._results_recorder:reset()
+
     state:run({ args = { file_id } })
 
     local file_specs = state._specs_recorder:await_specs()

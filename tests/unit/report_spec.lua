@@ -264,6 +264,7 @@ describe("report builder", function()
       results_path = json_path,
       code = 0,
       output = MOCK_OUTPUT_FILE,
+      position_ids = nil,
       expect_error = false,
     }
     opts = vim.tbl_extend("force", default_opts, opts or {})
@@ -279,6 +280,7 @@ describe("report builder", function()
           ["TestTwo"] = dirpath .. "/test_two.cpp",
           ["TestTwo.Bar"] = dirpath .. "/test_two.cpp",
         },
+        position_ids = opts.position_ids,
       },
     }, { code = opts.code, output = opts.output }, tree)
     local ok, message_or_results = pcall(function()
@@ -294,6 +296,211 @@ describe("report builder", function()
       return message_or_results
     end
   end
+
+  local function parameterized_tree(runtime_names)
+    local source_file = dirpath .. "/test_one.cpp"
+    local source_id = source_file .. "::TestOne::Foo"
+    local parse = require("neotest-gtest.parse")
+    lib.files.write(source_file, "TEST_P(TestOne, Foo) {}")
+
+    tree = parse.parse_positions(source_file, {
+      [source_id] = runtime_names,
+    })
+
+    return source_id
+  end
+
+  local function write_parameterized_results(cases)
+    local suites = {}
+    for _, case in ipairs(cases) do
+      local suite, name = case.full_name:match("^([^%.]+)%.(.+)$")
+      suites[#suites + 1] = {
+        name = suite,
+        testsuite = {
+          make_gtest_report({
+            name = name,
+            classname = suite,
+            failures = case.failures or {},
+            result = case.result or "COMPLETED",
+          }),
+        },
+      }
+    end
+
+    lib.files.write(json_path, vim.json.encode({ testsuites = suites }))
+  end
+
+  it("reports pass, fail, and skip on separate runtime leaves and fails the parent", function()
+    setup()
+    local names = { "First/TestOne.Foo/0", "First/TestOne.Foo/1", "Second/TestOne.Foo/0" }
+    local source_id = parameterized_tree(names)
+    write_parameterized_results({
+      { full_name = names[1] },
+      {
+        full_name = names[2],
+        failures = {
+          { failure = dirpath .. "/test_one.cpp:3\nexpected true, got false", type = "" },
+        },
+      },
+      { full_name = names[3], result = "SKIPPED" },
+    })
+
+    local results = make_neotest_results({
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id },
+    })
+
+    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
+    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
+    assert.equals("skipped", results[source_id .. "::" .. names[3]].status)
+    assert.equals("failed", results[source_id].status)
+    assert.equals(2, results[source_id .. "::" .. names[2]].errors[1].line)
+    assert.matches(
+      "expected true, got false",
+      results[source_id .. "::" .. names[2]].short,
+      1,
+      true
+    )
+    assert.same({}, results[source_id .. "::" .. names[1]].errors)
+  end)
+
+  it("fails selected runtime leaves when the JSON report is missing", function()
+    setup()
+    local name = "First/TestOne.Foo/0"
+    local source_id = parameterized_tree({ name })
+
+    local results = make_neotest_results({
+      results_path = dirpath .. "/missing.json",
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id .. "::" .. name },
+    })
+
+    assert.equals("failed", results[source_id .. "::" .. name].status)
+    assert.matches("result", results[source_id .. "::" .. name].errors[1].message)
+  end)
+
+  it("fails unreported runtime leaves when the process crashes after partial JSON", function()
+    setup()
+    local names = { "First/TestOne.Foo/0", "First/TestOne.Foo/1" }
+    local source_id = parameterized_tree(names)
+    write_parameterized_results({ { full_name = names[1] } })
+
+    local results = make_neotest_results({
+      code = 139,
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id },
+    })
+
+    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
+    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
+    assert.equals("failed", results[source_id].status)
+    assert.matches("139", results[source_id .. "::" .. names[2]].errors[1].message)
+  end)
+
+  it("fails a selected leaf when the process crashes after writing a passing report", function()
+    setup()
+    local name = "First/TestOne.Foo/0"
+    local source_id = parameterized_tree({ name })
+    write_parameterized_results({ { full_name = name } })
+
+    local results = make_neotest_results({
+      code = 139,
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id .. "::" .. name },
+    })
+
+    assert.equals("failed", results[source_id .. "::" .. name].status)
+    assert.matches("139", results[source_id .. "::" .. name].errors[1].message)
+  end)
+
+  it("fails a selected source when the process crashes after writing passing reports", function()
+    setup()
+    local name = "First/TestOne.Foo/0"
+    local source_id = parameterized_tree({ name })
+    write_parameterized_results({ { full_name = name } })
+
+    local results = make_neotest_results({
+      code = 139,
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id },
+    })
+
+    assert.equals("failed", results[source_id].status)
+    assert.matches("139", results[source_id].errors[1].message)
+    assert.equals("passed", results[source_id .. "::" .. name].status)
+  end)
+
+  it("diagnoses a returned runtime case that has no position", function()
+    setup()
+    local name = "First/TestOne.Foo/Unexpected"
+    local source_id = parameterized_tree({ "First/TestOne.Foo/0" })
+    write_parameterized_results({ { full_name = name } })
+    local notifications = ui_mock.NotificationsMock:new()
+
+    local results = make_neotest_results({
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id },
+    })
+    notifications:revert()
+
+    assert.is_nil(results[source_id .. "::" .. name])
+    notifications:assert_notified(name, vim.log.levels.WARN)
+    assert.equals("failed", results[source_id].status)
+    assert.matches("Runtime case has no position", results[source_id].errors[1].message)
+  end)
+
+  it("warns when a returned runtime suite has no source mapping", function()
+    setup()
+    local source_id = parameterized_tree({ "First/TestOne.Foo/0" })
+    local unknown_name = "Other/Unexpected.Case/0"
+    write_parameterized_results({ { full_name = unknown_name } })
+    local notifications = ui_mock.NotificationsMock:new()
+
+    local results = make_neotest_results({
+      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
+      position_ids = { source_id },
+    })
+    notifications:revert()
+
+    assert.is_nil(results[source_id])
+    notifications:assert_notified(unknown_name, vim.log.levels.WARN)
+  end)
+
+  it("keeps duplicate runtime names from different executable mappings separate", function()
+    setup()
+    local runtime_name = "Same/TestOne.Foo/0"
+    local first_file = dirpath .. "/test_one.cpp"
+    local second_file = dirpath .. "/test_two.cpp"
+    local first_id = first_file .. "::TestOne::Foo"
+    local second_id = second_file .. "::TestOne::Foo"
+    local parse = require("neotest-gtest.parse")
+    lib.files.write(first_file, "TEST_P(TestOne, Foo) {}")
+    lib.files.write(second_file, "TEST_P(TestOne, Foo) {}")
+
+    tree = parse.parse_positions(first_file, { [first_id] = { runtime_name } })
+    write_parameterized_results({ { full_name = runtime_name } })
+    local first_results = make_neotest_results({
+      name2path = { [runtime_name] = first_file, ["TestOne.Foo"] = first_file },
+      position_ids = { first_id },
+    })
+
+    tree = parse.parse_positions(second_file, { [second_id] = { runtime_name } })
+    write_parameterized_results({
+      {
+        full_name = runtime_name,
+        failures = { { failure = second_file .. ":1\nsecond executable failed", type = "" } },
+      },
+    })
+    local second_results = make_neotest_results({
+      name2path = { [runtime_name] = second_file, ["TestOne.Foo"] = first_file },
+      position_ids = { second_id },
+    })
+
+    assert.equals("passed", first_results[first_id .. "::" .. runtime_name].status)
+    assert.is_nil(first_results[second_id .. "::" .. runtime_name])
+    assert.equals("failed", second_results[second_id .. "::" .. runtime_name].status)
+    assert.is_nil(second_results[first_id .. "::" .. runtime_name])
+  end)
 
   it("builder happy path creates correct reports", function()
     setup()

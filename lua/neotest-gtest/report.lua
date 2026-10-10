@@ -210,7 +210,8 @@ end
 function ReportConverter:make_neotest_results()
   local gtest_json = self:_read_gtest_json()
   local results, unknown = {}, {}
-  for _, testsuite in ipairs(gtest_json.testsuites) do
+
+  for _, testsuite in ipairs(gtest_json and gtest_json.testsuites or {}) do
     for _, test in ipairs(testsuite.testsuite) do
       local node = self:_find_node_by_name(testsuite.name, test.name)
       if node == nil then
@@ -219,12 +220,25 @@ function ReportConverter:make_neotest_results()
         local report = Report:new(test, node)
         local id = node:data().id
         local result = report:to_neotest_report(self._result.output)
-        local runtime_id = id .. "::" .. testsuite.name .. "." .. test.name
+        local runtime_name = testsuite.name .. "." .. test.name
+        local runtime_id = id .. "::" .. runtime_name
         local runtime_node = self._tree:get_key(runtime_id)
 
         if runtime_node then
           results[runtime_id] = Report:new(test, runtime_node)
             :to_neotest_report(self._result.output)
+        elseif
+          self._spec.context.position_ids
+          and node:data().extra
+          and node:data().extra.kind == "TEST_P"
+          and #node:children() > 0
+        then
+          unknown[#unknown + 1] = runtime_name
+          result.status = "failed"
+          result.short = result.short .. "\nRuntime case has no position: " .. runtime_name
+          result.errors[#result.errors + 1] = {
+            message = "Runtime case has no position: " .. runtime_name,
+          }
         end
 
         if results[id] then
@@ -242,9 +256,113 @@ function ReportConverter:make_neotest_results()
       end
     end
   end
+
+  if gtest_json == nil or (self._result.code ~= 0 and self._result.code ~= 1) then
+    self:_fail_unreported_positions(results, gtest_json == nil)
+  end
+
   self:_notify_if_unknown_results(unknown)
   self:_notify_if_incomplete_results(results)
+
   return results
+end
+
+function ReportConverter:_fail_unreported_positions(results, missing_json)
+  local selected = self._spec.context.position_ids
+  if not selected then
+    return
+  end
+
+  local reason
+  if missing_json then
+    reason = string.format(
+      "Gtest executable failed to produce a result (exit code: %s)",
+      self._result.code
+    )
+  else
+    reason =
+      string.format("Gtest executable did not report this case (exit code: %s)", self._result.code)
+  end
+
+  local function fail_node(node)
+    local data = node:data()
+    if data.type == "test" and not results[data.id] then
+      local message = reason .. ": " .. (data.extra and data.extra.runtime_name or data.id)
+      results[data.id] = {
+        status = "failed",
+        output = self._result.output,
+        short = message,
+        errors = { { message = message } },
+      }
+    end
+
+    for _, child in ipairs(node:children()) do
+      fail_node(child)
+    end
+  end
+
+  for _, id in ipairs(selected) do
+    local node = self._tree:get_key(id)
+    if node then
+      fail_node(node)
+    end
+  end
+
+  if not missing_json and self._result.code ~= 0 and self._result.code ~= 1 then
+    for _, id in ipairs(selected) do
+      local node = self._tree:get_key(id)
+      if node then
+        local message = string.format(
+          "Gtest executable exited with code %s after writing results: %s",
+          self._result.code,
+          id
+        )
+        local result = results[id]
+
+        if result then
+          result.status = "failed"
+          result.short = result.short .. "\n\n" .. message
+          result.errors[#result.errors + 1] = { message = message }
+        else
+          results[id] = {
+            status = "failed",
+            output = self._result.output,
+            short = message,
+            errors = { { message = message } },
+          }
+        end
+
+        local parent = node:parent()
+        while parent do
+          if results[parent:data().id] then
+            results[parent:data().id].status = "failed"
+          end
+          parent = parent:parent()
+        end
+      end
+    end
+  end
+
+  -- A source position also reports the combined status of its runtime leaves.
+  for _, id in ipairs(selected) do
+    local node = self._tree:get_key(id)
+    if node then
+      for _, descendant in node:iter_nodes() do
+        local data = descendant:data()
+        if data.extra and data.extra.runtime_name then
+          local parent_id = descendant:parent():data().id
+          local parent = results[parent_id]
+          if parent and results[data.id] and results[data.id].status == "failed" then
+            parent.status = "failed"
+            if not parent.short:find(results[data.id].short, 1, true) then
+              parent.short = parent.short .. "\n\n" .. results[data.id].short
+              vim.list_extend(parent.errors, results[data.id].errors)
+            end
+          end
+        end
+      end
+    end
+  end
 end
 
 function ReportConverter:_find_node_by_name(namespace, name)
@@ -252,32 +370,27 @@ function ReportConverter:_find_node_by_name(namespace, name)
   local source_namespace = namespace
   local source_name = name
   local fpath
-  if ctx.name2path[namespace] then
+  local runtime_name = namespace .. "." .. name
+  if ctx.name2path[runtime_name] then
+    fpath = ctx.name2path[runtime_name]
+  elseif ctx.name2path[namespace] then
     fpath = ctx.name2path[namespace]
   elseif ctx.name2path[namespace .. "." .. name] then
     fpath = ctx.name2path[namespace .. "." .. name]
   end
+
   if fpath == nil or name:find("/", 1, true) then
     source_namespace = namespace:match(".*/([^/]+)$") or namespace
     source_name = name:match("^([^/]+)/[^/]+$") or name
-    fpath = ctx.name2path[source_namespace .. "." .. source_name] or ctx.name2path[source_namespace]
+    fpath = fpath
+      or ctx.name2path[source_namespace .. "." .. source_name]
+      or ctx.name2path[source_namespace]
   end
-  -- This can happen if plugin is working correctly but paths are misconfigured:
-  -- Say, file1 has test A::B and file2 has A::C, but they compile to different
-  -- executables. Now, you try to run file2 through file1's executable with
-  -- --gtest_filter=A.*: the results will include A::B from file1
-  -- (since it's the wrong executable and A.* means all tests in A), but it
-  -- will not be present in name2path. In a perfect world, we would let the
-  -- user know, but even this explanation is hard to follow, so if this happens
-  -- let them file a github issue and we'll figure it out together.
-  assert(
-    fpath,
-    string.format(
-      "Internal error: test %s.%s executed but not provided in name2path",
-      namespace,
-      name
-    )
-  )
+
+  if fpath == nil then
+    return nil
+  end
+
   local node_id = table.concat({ fpath, source_namespace, source_name }, "::")
   local node = self._tree:get_key(node_id)
   if source_namespace ~= namespace or source_name ~= name then
@@ -343,13 +456,15 @@ function ReportConverter:_collect_missing_nodes(results)
   end
 
   for name, fpath in pairs(self._spec.context.name2path) do
-    local node_id = fpath .. "::" .. string.gsub(name, "%.", "::")
-    if is_namespace_id(node_id) then
-      if not namespaces[name] then
+    if not name:find("/", 1, true) then
+      local node_id = fpath .. "::" .. string.gsub(name, "%.", "::")
+      if is_namespace_id(node_id) then
+        if not namespaces[name] then
+          missing[#missing + 1] = node_id
+        end
+      elseif is_leaf_id(node_id) and results[node_id] == nil then
         missing[#missing + 1] = node_id
       end
-    elseif is_leaf_id(node_id) and results[node_id] == nil then
-      missing[#missing + 1] = node_id
     end
   end
   return missing
@@ -364,6 +479,12 @@ function ReportConverter:_read_gtest_json()
     end)
   end
   if not success then
+    if not utils.fexists(self._spec.command[1]) then
+      self:_raise_gtest_failed()
+    end
+    if self._spec.context.position_ids then
+      return nil
+    end
     self:_raise_gtest_failed()
   end
 
