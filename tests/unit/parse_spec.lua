@@ -87,6 +87,29 @@ describe("config library", function()
     )
   end)
 
+  it("ignores functions that do not look like test macros", function()
+    assert_parses_as(
+      [[
+      TEST(NotTest1, Foo, Bar) {}
+      TEST(NotTest2 foo, Bar) {}
+      TEST(const NotTest3&, Bar) {}
+      int TEST(NotTest4, Bar) {}
+      TEST(NotTest5) {}
+      TEST() {}
+      TEST(NotTest6, Bar = 1) {}
+      TEST(TestFoo, Bar) {}
+      ]],
+      {
+        {
+          name = "TestFoo",
+          children = {
+            { name = "Bar", line_range = { 7, 7 } },
+          },
+        },
+      }
+    )
+  end)
+
   it("correctly separates two namespaces", function()
     assert_parses_as(
       [[

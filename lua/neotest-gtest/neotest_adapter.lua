@@ -154,7 +154,7 @@ end
 
 ---@class neotest-gtest.NeotestAdapter
 ---@field _tree neotest.Tree
----@field _extra_args string
+---@field _extra_args string|string[]
 ---@field _strategy_name string
 ---@field _output_counter integer
 ---@field _process_isolation boolean
@@ -306,7 +306,7 @@ function NeotestAdapter:_build_spec_for_executable(executable, nodes, results_di
       "--gtest_color=yes",
       self._extra_args,
     })
-    :flatten()
+    :flatten(math.huge)
     :totable()
 
   return {

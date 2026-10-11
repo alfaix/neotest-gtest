@@ -16,16 +16,51 @@ jobs:
           version: latest
           args: --check lua/ tests/
 
-  test:
-    runs-on: ubuntu-latest
+  tests:
+    name: tests
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        rev: [v0.12.0, nightly]
+        gtest_tag: [main]
+        include:
+          - os: ubuntu-22.04
+            rev: v0.12.0
+            gtest_tag: release-1.10.0
+          - os: ubuntu-22.04
+            rev: v0.12.0
+            gtest_tag: release-1.11.0
+          - os: ubuntu-22.04
+            rev: v0.12.0
+            gtest_tag: release-1.12.1
+          - os: ubuntu-22.04
+            rev: v0.12.0
+            gtest_tag: v1.13.0
+          - os: ubuntu-22.04
+            rev: v0.12.0
+            gtest_tag: v1.14.0
+    env:
+      TREE_SITTER_CPP_TAG: v0.23.4
     steps:
       - uses: actions/checkout@v4
-      - uses: rhysd/action-setup-vim@v1
-        with:
-          neovim: true
-          version: stable
-      - name: Install tree-sitter CLI
+      - name: Prepare Neovim
         run: |
-          curl -sSL https://github.com/tree-sitter/tree-sitter/releases/latest/download/tree-sitter-linux-x64.gz \
-            | gunzip > /usr/local/bin/tree-sitter && chmod +x /usr/local/bin/tree-sitter
-      - run: make test
+          mkdir -p _neovim
+          curl -fsL "https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}/nvim-linux-x86_64.tar.gz" | tar xzf - --strip-components=1 -C "${PWD}/_neovim"
+
+      - name: Build cpp tree-sitter parser
+        run: |
+          git clone --depth 1 --branch ${TREE_SITTER_CPP_TAG} https://github.com/tree-sitter/tree-sitter-cpp _tree-sitter-cpp
+          mkdir -p .tests/data/nvim/site/parser
+          cc -shared -fPIC -O2 -I_tree-sitter-cpp/src _tree-sitter-cpp/src/parser.c _tree-sitter-cpp/src/scanner.c \
+            -o .tests/data/nvim/site/parser/cpp.so
+
+      - name: Run tests
+        run: |
+          export PATH="${PWD}/_neovim/bin:${PATH}"
+          export VIM="${PWD}/_neovim/share/nvim/runtime"
+          nvim --version
+          make test GTEST_TAG=${{ matrix.gtest_tag }}

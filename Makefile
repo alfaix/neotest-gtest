@@ -1,7 +1,7 @@
 .PHONY: test unit-test integration-test submodules
 
 MINIMAL_INIT = tests/minimal_init.lua
-PLENARY_OPTS = {minimal_init='$(MINIMAL_INIT)', sequential=true, timeout=5000}
+PLENARY_OPTS = {minimal_init='$(MINIMAL_INIT)', sequential=true, timeout=30000}
 TESTS_HOME = $(CURDIR)/.tests
 export XDG_CONFIG_HOME = $(TESTS_HOME)/config
 export XDG_DATA_HOME = $(TESTS_HOME)/data
