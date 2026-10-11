@@ -2,8 +2,22 @@ local assert = require("luassert")
 local inventory = require("neotest-gtest.executables.inventory")
 local tree_utils = require("tests.utils.tree")
 local it = require("nio.tests").it
+local nio = require("nio")
 
 describe("Google Test runtime inventory", function()
+  it("stops an inventory process that exceeds its timeout", function()
+    nio.scheduler()
+
+    local executable = assert(vim.fn.tempname())
+    require("neotest.lib").files.write(executable, "#!/bin/sh\nsleep 1\n")
+    assert.is_true(vim.uv.fs_chmod(executable, 493))
+
+    local ok, err = pcall(inventory.list, executable, { timeout_ms = 20 })
+
+    assert.is_false(ok)
+    assert.matches("timed out", tostring(err), 1, true)
+  end)
+
   it("parses full compiled names and ignores parameter comments", function()
     local output = [[
 Running main() from /build/gtest_main.cc

@@ -4,6 +4,7 @@ local Report = require("neotest-gtest.report")
 local Adapter = require("neotest-gtest.neotest_adapter")
 local config = require("neotest-gtest.config")
 local inventory = require("neotest-gtest.executables.inventory")
+local refresh = require("neotest-gtest.executables.refresh")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
 local neotest = require("neotest")
 
@@ -78,11 +79,25 @@ function GTestNeotestAdapter.discover_positions(file_path)
 
   local registry = GlobalRegistry:for_dir(root)
   local executable_sources = {}
+  local configured_executables = {}
+
+  local file_executable = registry:configured_executable_for(file_path)
+  if file_executable then
+    configured_executables[file_executable] = true
+  end
 
   for _, node in source_tree:iter_nodes() do
     local data = node:data()
 
     local kind = data.extra and data.extra.kind
+    if data.type == "test" then
+      local configured = registry:configured_executable_for(data.id)
+
+      if configured then
+        configured_executables[configured] = true
+      end
+    end
+
     if
       data.type == "test"
       and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
@@ -98,6 +113,10 @@ function GTestNeotestAdapter.discover_positions(file_path)
 
   local runtime_by_source = {}
 
+  for executable in pairs(configured_executables) do
+    refresh.track(executable, file_path)
+  end
+
   for executable, source_ids in pairs(executable_sources) do
     local source_stat = vim.uv.fs_stat(file_path)
     local executable_stat = vim.uv.fs_stat(executable)
@@ -107,7 +126,7 @@ function GTestNeotestAdapter.discover_positions(file_path)
 
     if stale then
       utils.schedule_notify(
-        "Google Test inventory is stale; rebuild " .. executable .. " and save " .. file_path,
+        "Google Test inventory is stale; rebuild " .. executable,
         vim.log.levels.WARN
       )
     else

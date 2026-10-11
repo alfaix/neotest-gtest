@@ -40,6 +40,7 @@ end
 ---intended for tests only
 function GlobalExecutableRegistry:clear()
   self._root2registry = {}
+  require("neotest-gtest.executables.refresh").reset()
 end
 
 local globalRegistry = GlobalExecutableRegistry:new()

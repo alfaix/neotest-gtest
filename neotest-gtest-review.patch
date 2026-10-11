@@ -1,0 +1,3237 @@
+diff --git a/README.md b/README.md
+index 4571657..b185675 100644
+--- a/README.md
++++ b/README.md
+@@ -23,12 +23,36 @@ The plugin provides full support of all neotest features:
+ - debugging tests
+ - all other niceties of neotest
+ 
+-There are two major features which are not yet supported:
++One major feature is not yet supported:
+ 
+-- `TEST_P` (parameterized tests)
+ - Build tool integration for recompilation - you have to do that manually (or with
+   some other plugin) for now
+ 
++`TEST_P`, `TYPED_TEST`, and `TYPED_TEST_P` source declarations remain selectable
++parents. After an executable is configured and the file is saved, the summary
++shows each compiled case beneath its source declaration. Select a leaf to run or
++debug its exact Google Test name, or select the parent to run every compiled case
++for that declaration. Buffer-based nearest-test selection chooses the source
++parent. Generated cases report their results independently; a failed case also
++marks its parent failed.
++
++The executable's `--gtest_list_tests` output supplies the runtime names. Rebuild
++and save the source file after changing instantiations or types. Until the save
++refresh, source parents remain available and run as grouped tests. Other
++generated Google Test macro families are not yet supported.
++
++To run each compiled case in a separate process, set `process_isolation = true`
++in the adapter setup. This applies to normal runs; DAP runs keep their normal
++debugging behavior. The default is `false`, so a selection runs grouped by
++executable. Isolated runs start one process per case, which costs more time for
++large selections but prevents process-local state and a crashed case from
++affecting later cases. Each case uses an exact Google Test filter and its own
++JSON report. Generated cases require a configured executable and a refreshed
++runtime inventory; rebuild and save the source file before an isolated run.
++
++You can override the setting for one run with
++`require("neotest").run.run({ process_isolation = true })`.
++
+ Contributions are welcome! :)
+ 
+ ## Installation
+@@ -112,6 +136,8 @@ require("neotest-gtest").setup({
+   end,
+   -- How many old test results to keep on disk (stored in stdpath('data')/neotest-gtest/runs)
+   history_size = 3,
++  -- Run one compiled case per process for normal runs (slower on large selections).
++  process_isolation = false,
+   -- To prevent large projects from freezing your computer, there's some throttling
+   -- for -- parsing test files. Decrease if your parsing is slow and you have a
+   -- monster PC.
+diff --git a/lua/neotest-gtest/config.lua b/lua/neotest-gtest/config.lua
+index 53765a9..a26e3bc 100644
+--- a/lua/neotest-gtest/config.lua
++++ b/lua/neotest-gtest/config.lua
+@@ -46,6 +46,7 @@ local default_config = {
+   debug_adapter = "codelldb",
+   is_test_file = is_test_file,
+   history_size = 3,
++  process_isolation = false,
+   parsing_throttle_ms = 10,
+   mappings = { configure = nil },
+   summary_view = {
+diff --git a/lua/neotest-gtest/executables/ctest.lua b/lua/neotest-gtest/executables/ctest.lua
+index f1d8ead..d7f7bcb 100644
+--- a/lua/neotest-gtest/executables/ctest.lua
++++ b/lua/neotest-gtest/executables/ctest.lua
+@@ -84,9 +84,22 @@ end
+ local function pick_executable(exe2tests, tests, target)
+   local best, best_hits = nil, 0
+   for exe, known in pairs(exe2tests) do
++    local available = {}
++    for runtime_name in pairs(known) do
++      available[runtime_name] = true
++      local source_name = runtime_name:match("([^/]+%.[^/]+)/[^/]+$")
++      if source_name then
++        available[source_name] = true
++      end
++
++      local typed_suite, typed_test = runtime_name:match("([^/]+)/[^/]+%.([^/]+)$")
++      if typed_suite then
++        available[typed_suite .. "." .. typed_test] = true
++      end
++    end
+     local hits = 0
+     for _, name in ipairs(tests) do
+-      if known[name] then
++      if available[name] then
+         hits = hits + 1
+       end
+     end
+diff --git a/lua/neotest-gtest/executables/inventory.lua b/lua/neotest-gtest/executables/inventory.lua
+new file mode 100644
+index 0000000..fe4a885
+--- /dev/null
++++ b/lua/neotest-gtest/executables/inventory.lua
+@@ -0,0 +1,100 @@
++local M = {}
++local lib = require("neotest.lib")
++
++---List the tests registered in a compiled Google Test executable.
++---@async
++---@param executable string
++---@return string[]
++function M.list(executable)
++  local code, result = lib.process.run({ executable, "--gtest_list_tests" }, { stdout = true })
++
++  if code ~= 0 then
++    error(string.format("%s --gtest_list_tests exited with code %d", executable, code))
++  end
++
++  return M.parse_list(result.stdout)
++end
++
++---Parse full test names from Google Test's --gtest_list_tests output.
++---@param output string
++---@return string[]
++function M.parse_list(output)
++  local names = {}
++  local suite
++
++  for line in output:gmatch("[^\r\n]+") do
++    local value = vim.trim(line:gsub("%s+#.*$", ""))
++
++    if line:match("^%S") then
++      suite = value:match("^(.-)%.$")
++    elseif suite and value ~= "" then
++      names[#names + 1] = suite .. "." .. value
++    end
++  end
++
++  return names
++end
++
++---Group generated cases by their source declaration.
++---@param tree neotest.Tree
++---@param names string[]
++---@return table<string, string[]>, string[]
++function M.map_source(tree, names)
++  local by_source = {}
++  local sources_by_name = {}
++
++  for _, node in tree:iter_nodes() do
++    local data = node:data()
++
++    local kind = data.extra and data.extra.kind
++    if
++      data.type == "test"
++      and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
++    then
++      by_source[data.id] = {}
++
++      local source_name = node:parent():data().name .. "." .. data.name
++      sources_by_name[source_name] = sources_by_name[source_name] or {}
++      table.insert(sources_by_name[source_name], { id = data.id, kind = kind })
++    end
++  end
++
++  local unmatched = {}
++
++  for _, runtime_name in ipairs(names) do
++    local suite, test = runtime_name:match("^([^%.]+)%.([^%.]+)$")
++    local source_name
++    local kind
++
++    if suite and test and test:find("/", 1, true) then
++      source_name = (suite:match("([^/]+)$") or suite) .. "." .. test:match("^([^/]+)")
++      kind = "TEST_P"
++    elseif suite and test then
++      local fixture = suite:match("([^/]+)/[^/]+$")
++      source_name = fixture and fixture .. "." .. test
++    end
++
++    local sources = source_name and sources_by_name[source_name]
++    local ids = {}
++
++    for _, source in ipairs(sources or {}) do
++      local matches_value_parameter = kind == "TEST_P" and source.kind == kind
++      local matches_type_parameter = kind == nil and source.kind ~= "TEST_P"
++
++      if matches_value_parameter or matches_type_parameter then
++        ids[#ids + 1] = source.id
++      end
++    end
++
++    if #ids == 0 then
++      unmatched[#unmatched + 1] = runtime_name
++    else
++      assert(#ids == 1, "ambiguous generated source for " .. runtime_name)
++      table.insert(by_source[ids[1]], runtime_name)
++    end
++  end
++
++  return by_source, unmatched
++end
++
++return M
+diff --git a/lua/neotest-gtest/executables/registry.lua b/lua/neotest-gtest/executables/registry.lua
+index abd3873..7dd8566 100644
+--- a/lua/neotest-gtest/executables/registry.lua
++++ b/lua/neotest-gtest/executables/registry.lua
+@@ -61,6 +61,14 @@ function ExecutablesRegistry:list_executables()
+   return vim.tbl_keys(executables_set)
+ end
+ 
++---Look up a configured node or ancestor while discovery is rebuilding the tree.
++---@param id string
++---@return string|nil
++function ExecutablesRegistry:configured_executable_for(id)
++  self:_ensure_node_within_root(id)
++  return self._node2executable[id] or self:_lookup_ancestor_executable(id)
++end
++
+ ---@param id string
+ function ExecutablesRegistry:find_executables(id)
+   self:_reload_tree()
+diff --git a/lua/neotest-gtest/init.lua b/lua/neotest-gtest/init.lua
+index cd14a2e..8405c79 100644
+--- a/lua/neotest-gtest/init.lua
++++ b/lua/neotest-gtest/init.lua
+@@ -3,8 +3,33 @@ local parse = require("neotest-gtest.parse")
+ local Report = require("neotest-gtest.report")
+ local Adapter = require("neotest-gtest.neotest_adapter")
+ local config = require("neotest-gtest.config")
++local inventory = require("neotest-gtest.executables.inventory")
++local GlobalRegistry = require("neotest-gtest.executables.global_registry")
++local neotest = require("neotest")
+ 
+ local GTestNeotestAdapter = { name = "neotest-gtest" }
++
++local function discovery_root(file_path)
++  local prefix = GTestNeotestAdapter.name .. ":"
++  local root
++
++  local adapter_ids = neotest.state and neotest.state.adapter_ids and neotest.state.adapter_ids()
++    or {}
++
++  for _, adapter_id in ipairs(adapter_ids) do
++    if vim.startswith(adapter_id, prefix) then
++      local candidate = adapter_id:sub(#prefix + 1)
++      local within_root = file_path == candidate or vim.startswith(file_path, candidate .. "/")
++
++      if within_root and (root == nil or #candidate > #root) then
++        root = candidate
++      end
++    end
++  end
++
++  return root or utils.normalized_root(file_path)
++end
++
+ ---@param args neotest.RunArgs
+ ---@return nil | neotest.RunSpec[]
+ function GTestNeotestAdapter.build_spec(args)
+@@ -18,6 +43,20 @@ end
+ ---@param tree neotest.Tree
+ ---@return table<string, neotest.Result>
+ function GTestNeotestAdapter.results(spec, result, tree)
++  if spec.context and spec.context.isolated_cases then
++    local merged = {}
++
++    for _, case in ipairs(spec.context.isolated_cases) do
++      local process_result = case.process_result or { code = result.code, output = result.output }
++      local case_results = Report.converter:new(case, process_result, tree):make_neotest_results()
++      local id = case.context.position_ids[1]
++
++      merged[id] = assert(case_results[id], "Missing isolated result for " .. id)
++    end
++
++    return merged
++  end
++
+   local converter = Report.converter:new(spec, result, tree)
+   return converter:make_neotest_results()
+ end
+@@ -29,7 +68,73 @@ GTestNeotestAdapter.setup = function(user_config)
+   return GTestNeotestAdapter
+ end
+ 
+-GTestNeotestAdapter.discover_positions = parse.parse_positions
++function GTestNeotestAdapter.discover_positions(file_path)
++  local source_tree = parse.parse_positions(file_path)
++  local root = discovery_root(file_path)
++
++  if root == nil then
++    return source_tree
++  end
++
++  local registry = GlobalRegistry:for_dir(root)
++  local executable_sources = {}
++
++  for _, node in source_tree:iter_nodes() do
++    local data = node:data()
++
++    local kind = data.extra and data.extra.kind
++    if
++      data.type == "test"
++      and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
++    then
++      local executable = registry:configured_executable_for(data.id)
++
++      if executable then
++        executable_sources[executable] = executable_sources[executable] or {}
++        executable_sources[executable][data.id] = true
++      end
++    end
++  end
++
++  local runtime_by_source = {}
++
++  for executable, source_ids in pairs(executable_sources) do
++    local source_stat = vim.uv.fs_stat(file_path)
++    local executable_stat = vim.uv.fs_stat(executable)
++    local stale = source_stat
++      and executable_stat
++      and source_stat.mtime.sec > executable_stat.mtime.sec
++
++    if stale then
++      utils.schedule_notify(
++        "Google Test inventory is stale; rebuild " .. executable .. " and save " .. file_path,
++        vim.log.levels.WARN
++      )
++    else
++      local ok, names = pcall(inventory.list, executable)
++
++      if not ok then
++        utils.schedule_notify(
++          "Google Test inventory unavailable for " .. executable .. ": " .. tostring(names),
++          vim.log.levels.WARN
++        )
++      else
++        local mapped = inventory.map_source(source_tree, names)
++
++        for source_id in pairs(source_ids) do
++          runtime_by_source[source_id] = mapped[source_id] or {}
++        end
++      end
++    end
++  end
++
++  if next(runtime_by_source) == nil then
++    return source_tree
++  end
++
++  return parse.parse_positions(file_path, runtime_by_source)
++end
++
+ GTestNeotestAdapter.is_test_file = function(path)
+   return config.is_test_file(path)
+ end
+diff --git a/lua/neotest-gtest/isolation.lua b/lua/neotest-gtest/isolation.lua
+new file mode 100644
+index 0000000..3c95524
+--- /dev/null
++++ b/lua/neotest-gtest/isolation.lua
+@@ -0,0 +1,77 @@
++local lib = require("neotest.lib")
++local nio = require("nio")
++
++local M = {}
++
++-- Neotest accepts a custom strategy returning one Process for a selection.
++-- Its runner fills missing positions after each spec, so the child processes
++-- must finish before the adapter publishes the combined result.
++function M.strategy(spec)
++  local integrated = require("neotest.client.strategies.integrated")
++  local cases = spec.context.isolated_cases
++  local output_path = nio.fn.tempname()
++  local active
++  local complete = false
++  local stopped = false
++
++  return {
++    is_complete = function()
++      return complete
++    end,
++    output = function()
++      return output_path
++    end,
++    output_stream = function()
++      return function()
++        return nil
++      end
++    end,
++    attach = function()
++      if active then
++        active.attach()
++      end
++    end,
++    stop = function()
++      stopped = true
++      if active then
++        active.stop()
++      end
++    end,
++    result = function()
++      local output = {}
++      local exit_code = 0
++
++      for _, case in ipairs(cases) do
++        if stopped then
++          break
++        end
++
++        case.env = spec.env
++        case.cwd = spec.cwd
++        case.strategy = {}
++
++        active = integrated(case)
++        local code = active.result()
++        local child_output = active.output()
++        case.process_result = { code = code, output = child_output }
++
++        local ok, data = pcall(lib.files.read, child_output)
++        if ok then
++          output[#output + 1] = data
++        end
++
++        if code ~= 0 then
++          exit_code = 1
++        end
++
++        active = nil
++      end
++
++      lib.files.write(output_path, table.concat(output, "\n"))
++      complete = true
++      return stopped and 130 or exit_code
++    end,
++  }
++end
++
++return M
+diff --git a/lua/neotest-gtest/neotest_adapter.lua b/lua/neotest-gtest/neotest_adapter.lua
+index f69a756..17abd42 100644
+--- a/lua/neotest-gtest/neotest_adapter.lua
++++ b/lua/neotest-gtest/neotest_adapter.lua
+@@ -8,12 +8,36 @@ local config = require("neotest-gtest.config")
+ ---@return string filter Google Test filter string for the test
+ local function get_filter_for_test_node(node)
+   local data = node:data()
++  if data.extra and data.extra.runtime_name then
++    return data.extra.runtime_name
++  end
+   local posid = data.id
+   local test_kind = data.extra.kind
++
++  if test_kind == "TYPED_TEST" or test_kind == "TYPED_TEST_P" then
++    local children = node:children()
++    if #children > 0 then
++      return table.concat(
++        vim.tbl_map(function(child)
++          return child:data().extra.runtime_name
++        end, children),
++        ":"
++      )
++    end
++
++    local namespace = node:parent():data().name
++    local test_name = data.name
++    if test_kind == "TYPED_TEST_P" then
++      return string.format("*/%s/*.%s:%s/*.%s", namespace, test_name, namespace, test_name)
++    end
++
++    return string.format("%s/*.%s", namespace, test_name)
++  end
++
+   if test_kind == "TEST_P" then
+-    -- TODO: figure this out (will have to query executables and do
+-    -- best-effort matching, probably)
+-    utils.schedule_error("TEST_P is not yet supported, sorry :(")
++    local namespace = node:parent():data().name
++    local test_name = data.name
++    return string.format("*/%s.%s/*:%s.%s/*", namespace, test_name, namespace, test_name)
+   else
+     local parts = vim.split(posid, "::", { plain = true })
+     -- file::namespace::test_name
+@@ -30,7 +54,15 @@ local function get_filters_for_nodes(nodes)
+     if type == "test" then
+       return get_filter_for_test_node(node)
+     elseif type == "namespace" then
+-      return node:data().name .. ".*"
++      local namespace = node:data().name
++      local filters = { namespace .. ".*" }
++      for _, child in ipairs(node:children()) do
++        local kind = child:data().extra.kind
++        if kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P" then
++          filters[#filters + 1] = get_filter_for_test_node(child)
++        end
++      end
++      return table.concat(filters, ":")
+     else
+       utils.schedule_error("unknown node type " .. type)
+     end
+@@ -125,6 +157,7 @@ end
+ ---@field _extra_args string
+ ---@field _strategy_name string
+ ---@field _output_counter integer
++---@field _process_isolation boolean
+ local NeotestAdapter = {}
+ ---Creates a new NeotestAdapter, which is responsible for creating neotest run
+ ---specs
+@@ -136,6 +169,8 @@ function NeotestAdapter:new(args)
+     _extra_args = args.extra_args,
+     _strategy_name = args.strategy,
+     _output_counter = 0,
++    _process_isolation = args.process_isolation == nil and config.process_isolation
++      or args.process_isolation,
+   }
+   setmetatable(adapter, self)
+   self.__index = self
+@@ -148,6 +183,10 @@ end
+ function NeotestAdapter:build_specs()
+   local executable2nodes = self:_try_group_nodes_by_executable()
+ 
++  if self._process_isolation and self._strategy_name ~= "dap" then
++    return self:_build_isolated_specs(executable2nodes)
++  end
++
+   local specs = {}
+   for executable, nodes in pairs(executable2nodes) do
+     local spec = self:_build_spec_for_executable(executable, nodes)
+@@ -156,6 +195,67 @@ function NeotestAdapter:build_specs()
+   return specs
+ end
+ 
++---@param executable2nodes table<string, neotest.Tree[]>
++---@return neotest.RunSpec[]
++function NeotestAdapter:_build_isolated_specs(executable2nodes)
++  local cases = {}
++  local seen = {}
++  local results_dir
++
++  local function add_cases(executable, node)
++    local data = node:data()
++
++    if data.type == "test" then
++      local children = node:children()
++      local kind = data.extra and data.extra.kind
++      local generated = kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
++
++      if generated and #children == 0 and not (data.extra and data.extra.runtime_name) then
++        error("Process isolation requires compiled case inventory for " .. data.id)
++      end
++
++      if #children == 0 then
++        if not seen[data.id] then
++          seen[data.id] = true
++          results_dir = results_dir
++            or utils.new_results_dir({
++              history_size = config.history_size,
++            })
++          cases[#cases + 1] = self:_build_spec_for_executable(executable, { node }, results_dir)
++        end
++        return
++      end
++    end
++
++    for _, child in ipairs(node:children()) do
++      add_cases(executable, child)
++    end
++  end
++
++  for executable, nodes in pairs(executable2nodes) do
++    for _, node in ipairs(nodes) do
++      add_cases(executable, node)
++    end
++  end
++
++  if #cases == 0 then
++    return {}
++  end
++
++  table.sort(cases, function(left, right)
++    return left.context.position_ids[1] < right.context.position_ids[1]
++  end)
++
++  return {
++    {
++      cwd = utils.normalized_root(vim.loop.cwd()),
++      command = cases[1].command,
++      context = { isolated_cases = cases },
++      strategy = require("neotest-gtest.isolation").strategy,
++    },
++  }
++end
++
+ ---@return table<string, neotest.Tree> executable2nodes
+ ---@private
+ function NeotestAdapter:_try_group_nodes_by_executable()
+@@ -184,14 +284,17 @@ end
+ 
+ ---@param executable string
+ ---@param nodes neotest.Tree[]
++---@param results_dir? string
+ ---@return neotest.RunSpec
+ ---@private
+-function NeotestAdapter:_build_spec_for_executable(executable, nodes)
++function NeotestAdapter:_build_spec_for_executable(executable, nodes, results_dir)
+   nodes = get_filterable_nodes(nodes)
+   local filters = get_filters_for_nodes(nodes)
+-  local results_path = utils.new_results_dir({
++  results_dir = results_dir or utils.new_results_dir({
+     history_size = config.history_size,
+-  }) .. "/test_result_" .. self._output_counter .. ".json"
++  })
++  local results_path = results_dir .. "/test_result_" .. self._output_counter .. ".json"
++  self._output_counter = self._output_counter + 1
+ 
+   local command = vim
+     .iter({
+@@ -212,6 +315,9 @@ function NeotestAdapter:_build_spec_for_executable(executable, nodes)
+     context = {
+       results_path = results_path,
+       name2path = self:_map_names_to_paths(nodes),
++      position_ids = vim.tbl_map(function(node)
++        return node:data().id
++      end, nodes),
+     },
+     strategy = self:_make_strategy_for_command(command),
+   }
+@@ -222,16 +328,41 @@ end
+ ---@private
+ function NeotestAdapter:_map_names_to_paths(nodes)
+   local name2path = {}
++  local function map_name(name, path, strict)
++    if strict then
++      assert(
++        name2path[name] == nil or name2path[name] == path,
++        "Conflicting executable mappings for " .. name
++      )
++    end
++    name2path[name] = path
++  end
++  local function map_runtime(node)
++    for _, child in ipairs(node:children()) do
++      if child:data().extra and child:data().extra.runtime_name then
++        map_name(child:data().extra.runtime_name, child:data().path, true)
++      end
++      map_runtime(child)
++    end
++  end
+   for _, node in ipairs(nodes) do
+     local data = node:data()
+     if data.type == "test" then
+-      local ns_name = node:parent():data().name
+-      name2path[ns_name .. "." .. data.name] = data.path
++      if data.extra and data.extra.runtime_name then
++        local source = node:parent()
++        local ns_name = source:parent():data().name
++        map_name(ns_name .. "." .. source:data().name, data.path)
++        map_name(data.extra.runtime_name, data.path, true)
++      else
++        local ns_name = node:parent():data().name
++        map_name(ns_name .. "." .. data.name, data.path)
++      end
+     elseif data.type == "namespace" then
+-      name2path[data.name] = data.path
++      map_name(data.name, data.path)
+     else
+       utils.schedule_error("unknown node type " .. type)
+     end
++    map_runtime(node)
+   end
+   return name2path
+ end
+diff --git a/lua/neotest-gtest/parse.lua b/lua/neotest-gtest/parse.lua
+index 031d7a3..bec3dea 100644
+--- a/lua/neotest-gtest/parse.lua
++++ b/lua/neotest-gtest/parse.lua
+@@ -17,14 +17,14 @@ local injections_text = nil
+ -- (and with proper compiler flags the CPP code should also compile which should
+ --  mean that treesitter should continue to parse these as function definitions)
+ -- Thus, we match all function definitions that meet ALL of the following criteria:
+--- * Named TEST/TEST_F/TEST_P (#any-of)
++-- * Named TEST/TEST_F/TEST_P/TYPED_TEST/TYPED_TEST_P (#any-of)
+ -- * Do not declare a return type (!type)
+ -- * Only have two parameters (. anchors)
+ -- * Both parameters are unnamed (!declarator)
+ -- * Both parameters' type is a simple type_identifier, i.e., no references
+ --   or cv-qualifiers or templates (type: (type_identifier))
+ -- The first parameter is the test suite, the second one is the test case
+--- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
++-- The name of the "function" is the test kind.
+ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
+   "cpp",
+   [[
+@@ -40,7 +40,7 @@ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
+       )
+       !type
+   )
+-  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P"))
++  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P" "TYPED_TEST" "TYPED_TEST_P"))
+   @test.definition
+ ]]
+ )
+@@ -122,7 +122,6 @@ local function extract_captures(
+   return namespaces, tests
+ end
+ 
+--- TODO support TEST_P and use the index in the name (0/1/2/3)
+ ---Create a unique id for a position by concatenating its name with names of its
+ ---parents.
+ ---@param position neotest.Position The position to return an ID for
+@@ -138,16 +137,18 @@ end
+ -- level is {parent, children...}
+ -- Each child is in turn also a level
+ -- Thus, {a, {b, {c}}, {d}, {e, {f}, {g}}} represents a(b(c))(d)(e(f,g))
+--- We only have three levels: file, namespace, test
+--- We can consider making TEST_P into a nested namespace but that's probably a
+--- bad idea. I do not understand the implcations yet.
++-- Generated runtime cases form a fourth level below their source declaration.
++
++local function is_generated_kind(kind)
++  return kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
++end
+ 
+ ---Builds a tree from a list of namespaces and tests extracted from
+ ---the file represented by `fileobj`.
+ ---@param fileobj neotest.Position The file to build the tree for
+ ---@param tests any
+ ---@return table
+-local function build_tree(fileobj, namespaces, tests)
++local function build_tree(fileobj, namespaces, tests, runtime_by_source)
+   local tree = { fileobj }
+   local namespace2idx = {}
+   for name, range in pairs(namespaces) do
+@@ -172,12 +173,26 @@ local function build_tree(fileobj, namespaces, tests)
+       extra = { kind = test.kind },
+     }
+     testobj.id = position_id(testobj, { namespace[1] })
+-    namespace[#namespace + 1] = testobj
++    local source = testobj
++    if is_generated_kind(test.kind) and runtime_by_source and runtime_by_source[testobj.id] then
++      source = { testobj }
++      for _, runtime_name in ipairs(runtime_by_source[testobj.id]) do
++        source[#source + 1] = {
++          id = testobj.id .. "::" .. runtime_name,
++          type = "test",
++          path = fileobj.path,
++          name = runtime_name,
++          range = test.range,
++          extra = { kind = test.kind, runtime_name = runtime_name },
++        }
++      end
++    end
++    namespace[#namespace + 1] = source
+   end
+   return tree
+ end
+ 
+-local function collect_tests(file_path, source, root)
++local function collect_tests(file_path, source, root, runtime_by_source)
+   local path_elems = vim.split(file_path, files.sep, { plain = true })
+   local fileobj = {
+     id = file_path,
+@@ -187,7 +202,7 @@ local function collect_tests(file_path, source, root)
+     range = { root:range() },
+   }
+   local namespaces, tests = extract_captures(TREESITTER_GTEST_QUERY, source, root)
+-  return build_tree(fileobj, namespaces, tests)
++  return build_tree(fileobj, namespaces, tests, runtime_by_source)
+ end
+ 
+ local function get_file_language(file_path)
+@@ -211,23 +226,23 @@ local function parser_get_tree(lang_tree)
+   return root
+ end
+ 
+-local function parse_positions_from_string(file_path, content)
++local function parse_positions_from_string(file_path, content, runtime_by_source)
+   local lang = get_file_language(file_path)
+   local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
+   local treesitter_tree = parser_get_tree(lang_tree)
+-  local tests_tree = collect_tests(file_path, content, treesitter_tree)
++  local tests_tree = collect_tests(file_path, content, treesitter_tree, runtime_by_source)
+   local neotest_tree = Tree.from_list(tests_tree, function(pos)
+     return pos.id
+   end)
+   return neotest_tree
+ end
+ 
+-function M.parse_positions(file_path)
++function M.parse_positions(file_path, runtime_by_source)
+   -- throttle: can cause very high CPU load for large projects and freeze
+   nio.sleep(config.parsing_throttle_ms)
+   local content = files.read(file_path)
+   nio.scheduler()
+-  return parse_positions_from_string(file_path, content)
++  return parse_positions_from_string(file_path, content, runtime_by_source)
+ end
+ 
+ return M
+diff --git a/lua/neotest-gtest/report.lua b/lua/neotest-gtest/report.lua
+index 1cdbc8a..05b2200 100644
+--- a/lua/neotest-gtest/report.lua
++++ b/lua/neotest-gtest/report.lua
+@@ -210,48 +210,196 @@ end
+ function ReportConverter:make_neotest_results()
+   local gtest_json = self:_read_gtest_json()
+   local results, unknown = {}, {}
+-  for _, testsuite in ipairs(gtest_json.testsuites) do
++
++  for _, testsuite in ipairs(gtest_json and gtest_json.testsuites or {}) do
+     for _, test in ipairs(testsuite.testsuite) do
+       local node = self:_find_node_by_name(testsuite.name, test.name)
+       if node == nil then
+         unknown[#unknown + 1] = testsuite.name .. "." .. test.name
+       else
+         local report = Report:new(test, node)
+-        results[node:data().id] = report:to_neotest_report(self._result.output)
++        local id = node:data().id
++        local result = report:to_neotest_report(self._result.output)
++        local runtime_name = testsuite.name .. "." .. test.name
++        local runtime_id = id .. "::" .. runtime_name
++        local runtime_node = self._tree:get_key(runtime_id)
++        local kind = node:data().extra and node:data().extra.kind
++        local is_generated = kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
++
++        if runtime_node then
++          results[runtime_id] = Report:new(test, runtime_node)
++            :to_neotest_report(self._result.output)
++        elseif self._spec.context.position_ids and is_generated and #node:children() > 0 then
++          unknown[#unknown + 1] = runtime_name
++          result.status = "failed"
++          result.short = result.short .. "\nRuntime case has no position: " .. runtime_name
++          result.errors[#result.errors + 1] = {
++            message = "Runtime case has no position: " .. runtime_name,
++          }
++        end
++
++        if results[id] then
++          local previous = results[id]
++          if result.status == "failed" or previous.status == "failed" then
++            previous.status = "failed"
++          elseif result.status == "passed" then
++            previous.status = "passed"
++          end
++          previous.short = previous.short .. "\n\n" .. result.short
++          vim.list_extend(previous.errors, result.errors)
++        else
++          results[id] = result
++        end
+       end
+     end
+   end
++
++  if gtest_json == nil or (self._result.code ~= 0 and self._result.code ~= 1) then
++    self:_fail_unreported_positions(results, gtest_json == nil)
++  end
++
+   self:_notify_if_unknown_results(unknown)
+   self:_notify_if_incomplete_results(results)
++
+   return results
+ end
+ 
++function ReportConverter:_fail_unreported_positions(results, missing_json)
++  local selected = self._spec.context.position_ids
++  if not selected then
++    return
++  end
++
++  local reason
++  if missing_json then
++    reason = string.format(
++      "Gtest executable failed to produce a result (exit code: %s)",
++      self._result.code
++    )
++  else
++    reason =
++      string.format("Gtest executable did not report this case (exit code: %s)", self._result.code)
++  end
++
++  local function fail_node(node)
++    local data = node:data()
++    if data.type == "test" and not results[data.id] then
++      local message = reason .. ": " .. (data.extra and data.extra.runtime_name or data.id)
++      results[data.id] = {
++        status = "failed",
++        output = self._result.output,
++        short = message,
++        errors = { { message = message } },
++      }
++    end
++
++    for _, child in ipairs(node:children()) do
++      fail_node(child)
++    end
++  end
++
++  for _, id in ipairs(selected) do
++    local node = self._tree:get_key(id)
++    if node then
++      fail_node(node)
++    end
++  end
++
++  if not missing_json and self._result.code ~= 0 and self._result.code ~= 1 then
++    for _, id in ipairs(selected) do
++      local node = self._tree:get_key(id)
++      if node then
++        local message = string.format(
++          "Gtest executable exited with code %s after writing results: %s",
++          self._result.code,
++          id
++        )
++        local result = results[id]
++
++        if result then
++          result.status = "failed"
++          result.short = result.short .. "\n\n" .. message
++          result.errors[#result.errors + 1] = { message = message }
++        else
++          results[id] = {
++            status = "failed",
++            output = self._result.output,
++            short = message,
++            errors = { { message = message } },
++          }
++        end
++
++        local parent = node:parent()
++        while parent do
++          if results[parent:data().id] then
++            results[parent:data().id].status = "failed"
++          end
++          parent = parent:parent()
++        end
++      end
++    end
++  end
++
++  -- A source position also reports the combined status of its runtime leaves.
++  for _, id in ipairs(selected) do
++    local node = self._tree:get_key(id)
++    if node then
++      for _, descendant in node:iter_nodes() do
++        local data = descendant:data()
++        if data.extra and data.extra.runtime_name then
++          local parent_id = descendant:parent():data().id
++          local parent = results[parent_id]
++          if parent and results[data.id] and results[data.id].status == "failed" then
++            parent.status = "failed"
++            if not parent.short:find(results[data.id].short, 1, true) then
++              parent.short = parent.short .. "\n\n" .. results[data.id].short
++              vim.list_extend(parent.errors, results[data.id].errors)
++            end
++          end
++        end
++      end
++    end
++  end
++end
++
+ function ReportConverter:_find_node_by_name(namespace, name)
+   local ctx = assert(self._spec.context, "context must not be nil")
++  local source_namespace = namespace
++  local source_name = name
+   local fpath
+-  if ctx.name2path[namespace] then
++  local runtime_name = namespace .. "." .. name
++  if ctx.name2path[runtime_name] then
++    fpath = ctx.name2path[runtime_name]
++  elseif ctx.name2path[namespace] then
+     fpath = ctx.name2path[namespace]
+   elseif ctx.name2path[namespace .. "." .. name] then
+     fpath = ctx.name2path[namespace .. "." .. name]
+   end
+-  -- This can happen if plugin is working correctly but paths are misconfigured:
+-  -- Say, file1 has test A::B and file2 has A::C, but they compile to different
+-  -- executables. Now, you try to run file2 through file1's executable with
+-  -- --gtest_filter=A.*: the results will include A::B from file1
+-  -- (since it's the wrong executable and A.* means all tests in A), but it
+-  -- will not be present in name2path. In a perfect world, we would let the
+-  -- user know, but even this explanation is hard to follow, so if this happens
+-  -- let them file a github issue and we'll figure it out together.
+-  assert(
+-    fpath,
+-    string.format(
+-      "Internal error: test %s.%s executed but not provided in name2path",
+-      namespace,
+-      name
+-    )
+-  )
+-  local node_id = table.concat({ fpath, namespace, name }, "::")
+-  return self._tree:get_key(node_id)
++
++  if name:find("/", 1, true) then
++    source_namespace = namespace:match(".*/([^/]+)$") or namespace
++    source_name = name:match("^([^/]+)/[^/]+$") or name
++  elseif namespace:find("/", 1, true) then
++    source_namespace = namespace:match("([^/]+)/[^/]+$") or namespace
++  end
++
++  if fpath == nil then
++    fpath = ctx.name2path[source_namespace .. "." .. source_name] or ctx.name2path[source_namespace]
++  end
++
++  if fpath == nil then
++    return nil
++  end
++
++  local node_id = table.concat({ fpath, source_namespace, source_name }, "::")
++  local node = self._tree:get_key(node_id)
++  if source_namespace ~= namespace or source_name ~= name then
++    local kind = node and node:data().extra and node:data().extra.kind
++    if kind ~= "TEST_P" and kind ~= "TYPED_TEST" and kind ~= "TYPED_TEST_P" then
++      return nil
++    end
++  end
++  return node
+ end
+ 
+ function ReportConverter:_notify_if_unknown_results(unknown)
+@@ -309,13 +457,15 @@ function ReportConverter:_collect_missing_nodes(results)
+   end
+ 
+   for name, fpath in pairs(self._spec.context.name2path) do
+-    local node_id = fpath .. "::" .. string.gsub(name, "%.", "::")
+-    if is_namespace_id(node_id) then
+-      if not namespaces[name] then
++    if not name:find("/", 1, true) then
++      local node_id = fpath .. "::" .. string.gsub(name, "%.", "::")
++      if is_namespace_id(node_id) then
++        if not namespaces[name] then
++          missing[#missing + 1] = node_id
++        end
++      elseif is_leaf_id(node_id) and results[node_id] == nil then
+         missing[#missing + 1] = node_id
+       end
+-    elseif is_leaf_id(node_id) and results[node_id] == nil then
+-      missing[#missing + 1] = node_id
+     end
+   end
+   return missing
+@@ -330,6 +480,12 @@ function ReportConverter:_read_gtest_json()
+     end)
+   end
+   if not success then
++    if not utils.fexists(self._spec.command[1]) then
++      self:_raise_gtest_failed()
++    end
++    if self._spec.context.position_ids then
++      return nil
++    end
+     self:_raise_gtest_failed()
+   end
+ 
+diff --git a/tests/integration/cpp/CMakeLists.txt b/tests/integration/cpp/CMakeLists.txt
+index 50b0c39..0cdfe55 100644
+--- a/tests/integration/cpp/CMakeLists.txt
++++ b/tests/integration/cpp/CMakeLists.txt
+@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ 
+ add_executable(test-executable src/test_one.cpp src/test_two.cpp)
+ add_executable(test-executable2 src/subdirectory/test_three.cpp)
++add_executable(test-typed src/test_typed.cpp)
++add_executable(test-isolation src/test_isolation.cpp)
++
++add_executable(test-inventory fixtures/param_inventory.cpp)
+ 
+ enable_testing()
+ include(FetchContent)
+@@ -47,7 +51,15 @@ endif()
+ 
+ target_link_libraries(test-executable ${GTEST_TARGET})
+ target_link_libraries(test-executable2 ${GTEST_TARGET})
++target_link_libraries(test-typed ${GTEST_TARGET})
++target_link_libraries(test-isolation ${GTEST_TARGET})
++
++target_link_libraries(test-inventory ${GTEST_TARGET})
+ 
+ include(GoogleTest)
+ gtest_discover_tests(test-executable)
+ gtest_discover_tests(test-executable2)
++gtest_discover_tests(test-typed)
++gtest_discover_tests(test-isolation)
++
++gtest_discover_tests(test-inventory)
+diff --git a/tests/integration/cpp/fixtures/param_inventory.cpp b/tests/integration/cpp/fixtures/param_inventory.cpp
+new file mode 100644
+index 0000000..5d7f6f3
+--- /dev/null
++++ b/tests/integration/cpp/fixtures/param_inventory.cpp
+@@ -0,0 +1,45 @@
++#include <gtest/gtest.h>
++
++#include <string>
++#include <tuple>
++
++class PairFixture : public ::testing::TestWithParam<std::tuple<int, bool>> {};
++
++TEST_P(PairFixture, Combined) {
++  EXPECT_GE(std::get<0>(GetParam()), 1);
++  EXPECT_FALSE(std::get<0>(GetParam()) == 2 && std::get<1>(GetParam()))
++      << "expected only one pair to fail";
++}
++
++INSTANTIATE_TEST_SUITE_P(Pairs, PairFixture,
++                         ::testing::Combine(::testing::Values(1, 2),
++                                            ::testing::Bool()));
++
++class NamedFixture : public ::testing::TestWithParam<int> {};
++
++TEST_P(NamedFixture, Runs) {
++  EXPECT_GT(GetParam(), 0);
++}
++
++TEST_P(NamedFixture, Skips) {
++  GTEST_SKIP() << "inventory skip";
++}
++
++TEST_P(NamedFixture, DISABLED_NotRun) {
++  FAIL() << "disabled case ran";
++}
++
++static std::string parameter_name(const ::testing::TestParamInfo<int>& info) {
++  return info.param == 7 ? "Seven" : "Nine";
++}
++
++INSTANTIATE_TEST_SUITE_P(Custom, NamedFixture, ::testing::Values(7, 9),
++                         parameter_name);
++
++class EmptyFixture : public ::testing::TestWithParam<int> {};
++
++TEST_P(EmptyFixture, NeverInstantiated) {
++  FAIL() << "no instances expected";
++}
++
++GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(EmptyFixture);
+diff --git a/tests/integration/cpp/src/test_isolation.cpp b/tests/integration/cpp/src/test_isolation.cpp
+new file mode 100644
+index 0000000..4053562
+--- /dev/null
++++ b/tests/integration/cpp/src/test_isolation.cpp
+@@ -0,0 +1,38 @@
++#include <gtest/gtest.h>
++
++#include <cstdlib>
++
++namespace {
++
++int process_local_state = 0;
++
++TEST(Isolation, AWriteState) { // NODE:Isolation::AWriteState,passed
++  process_local_state = 1;
++} // NODEEND
++
++TEST(Isolation, BObserveFreshState) { // NODE:Isolation::BObserveFreshState,failed
++  EXPECT_EQ(0, process_local_state); /* MESSAGE:
++  Expected equality of these values:
++    0
++    process_local_state
++      Which is: 1
++  */
++} // NODEEND
++
++TEST(Isolation, CFail) { // NODE:Isolation::CFail,passed
++  if (std::getenv("NEOTEST_GTEST_ISOLATION_FAILURE")) {
++    FAIL() << "isolated assertion failed";
++  }
++} // NODEEND
++
++TEST(Isolation, DCrash) { // NODE:Isolation::DCrash,passed
++  if (std::getenv("NEOTEST_GTEST_ISOLATION_CRASH")) {
++    std::abort();
++  }
++} // NODEEND
++
++TEST(Isolation, EAfterCrash) { // NODE:Isolation::EAfterCrash,passed
++  SUCCEED();
++} // NODEEND
++
++} // namespace
+diff --git a/tests/integration/cpp/src/test_two.cpp b/tests/integration/cpp/src/test_two.cpp
+index 2ff439c..9c5f958 100644
+--- a/tests/integration/cpp/src/test_two.cpp
++++ b/tests/integration/cpp/src/test_two.cpp
+@@ -1,5 +1,8 @@
+ #include <gtest/gtest.h>
+ 
++#include <cstdlib>
++#include <vector>
++
+ namespace test_two {
+ 
+ class TestFixture : public ::testing::Test {
+@@ -33,4 +36,25 @@ TEST_F(TestFixture, FailInFixture) { // NODE:TestFixture::FailInFixture,failed
+   fail();
+ } // NODEEND
+ 
++class ParamFixture : public ::testing::TestWithParam<int> {};
++
++TEST_P(ParamFixture, Positive) { // NODE:ParamFixture::Positive,passed
++  EXPECT_GE(GetParam(), 0);
++
++  if (std::getenv("NEOTEST_GTEST_FAIL_PARAM") && GetParam() == 1) {
++    FAIL() << "selected parameter failed";
++  }
++} // NODEEND
++
++TEST_P(ParamFixture, Small) { // NODE:ParamFixture::Small,passed
++  EXPECT_LE(GetParam(), 2);
++} // NODEEND
++
++static std::vector<int> second_values() { return {2}; }
++
++INSTANTIATE_TEST_SUITE_P(First, ParamFixture, ::testing::Values(0, 1));
++
++INSTANTIATE_TEST_SUITE_P(Second, ParamFixture,
++                         ::testing::ValuesIn(second_values()));
++
+ } // namespace test_two
+diff --git a/tests/integration/cpp/src/test_typed.cpp b/tests/integration/cpp/src/test_typed.cpp
+new file mode 100644
+index 0000000..dee5d2a
+--- /dev/null
++++ b/tests/integration/cpp/src/test_typed.cpp
+@@ -0,0 +1,58 @@
++#include <gtest/gtest.h>
++
++#include <cstdlib>
++#include <string>
++#include <type_traits>
++
++template <typename T> class TypedFixture : public ::testing::Test {};
++
++using TypedTypes = ::testing::Types<int, long>;
++
++class TypeNames {
++public:
++  template <typename T> static std::string GetName(int) {
++    return std::is_same<T, int>::value ? "Small" : "Large";
++  }
++};
++
++TYPED_TEST_SUITE(TypedFixture, TypedTypes, TypeNames);
++
++TYPED_TEST(TypedFixture, Passes) { // NODE:TypedFixture::Passes,passed
++  TypeParam value = 1;
++  EXPECT_GT(value, 0);
++} // NODEEND
++
++TYPED_TEST(TypedFixture, FailsWhenRequested) { // NODE:TypedFixture::FailsWhenRequested,passed
++  TypeParam value = 1;
++  EXPECT_GT(value, 0);
++
++  if (std::getenv("NEOTEST_GTEST_FAIL_TYPED") && sizeof(TypeParam) == sizeof(long)) {
++    FAIL() << "selected typed case failed";
++  }
++} // NODEEND
++
++template <typename T> class PatternFixture : public ::testing::Test {};
++
++TYPED_TEST_SUITE_P(PatternFixture);
++
++TYPED_TEST_P(PatternFixture, Passes) { // NODE:PatternFixture::Passes,passed
++  TypeParam value = 1;
++  EXPECT_GT(value, 0);
++} // NODEEND
++
++TYPED_TEST_P(PatternFixture, FailsWhenRequested) { // NODE:PatternFixture::FailsWhenRequested,passed
++  TypeParam value = 1;
++  EXPECT_GT(value, 0);
++
++  if (std::getenv("NEOTEST_GTEST_FAIL_TYPED") && std::is_same<TypeParam, long>::value) {
++    FAIL() << "selected type pattern failed";
++  }
++} // NODEEND
++
++REGISTER_TYPED_TEST_SUITE_P(PatternFixture, Passes, FailsWhenRequested);
++
++using FirstPatternTypes = ::testing::Types<int, long>;
++using SecondPatternTypes = ::testing::Types<short, int>;
++
++INSTANTIATE_TYPED_TEST_SUITE_P(First, PatternFixture, FirstPatternTypes);
++INSTANTIATE_TYPED_TEST_SUITE_P(Second, PatternFixture, SecondPatternTypes);
+diff --git a/tests/integration/inventory_spec.lua b/tests/integration/inventory_spec.lua
+new file mode 100644
+index 0000000..bca1339
+--- /dev/null
++++ b/tests/integration/inventory_spec.lua
+@@ -0,0 +1,341 @@
++local assert = require("luassert")
++local it = require("nio.tests").it
++local lib = require("neotest.lib")
++local inventory = require("neotest-gtest.executables.inventory")
++local parse = require("neotest-gtest.parse")
++local adapter = require("neotest-gtest")
++local config = require("neotest-gtest.config")
++local executables = require("neotest-gtest.executables")
++local GlobalRegistry = require("neotest-gtest.executables.global_registry")
++
++describe("compiled Google Test inventory", function()
++  local old_root
++  local old_lookup
++  local old_find_executables
++  local configured_registry
++
++  after_each(function()
++    if old_root then
++      config.root = old_root
++    end
++
++    if old_lookup then
++      configured_registry.configured_executable_for = old_lookup
++    end
++
++    if old_find_executables then
++      executables.find_executables = old_find_executables
++    end
++  end)
++
++  it("discovers three runtime leaves and runs one exact case", function()
++    local root = vim.uv.cwd() .. "/tests/integration/cpp"
++    local source = root .. "/src/test_two.cpp"
++    local executable = root .. "/build/test-executable"
++    local source_id = source .. "::ParamFixture::Positive"
++    local registry = GlobalRegistry:for_dir(root)
++
++    old_root = config.root
++    old_lookup = registry.configured_executable_for
++    old_find_executables = executables.find_executables
++    configured_registry = registry
++
++    config.root = function()
++      return root
++    end
++
++    registry.configured_executable_for = function()
++      return executable
++    end
++
++    executables.find_executables = function(node)
++      return { [executable] = { node:data().id } }, {}
++    end
++
++    local tree = adapter.discover_positions(source)
++    local parent = assert(tree:get_key(source_id))
++    local names = vim.tbl_map(function(node)
++      return node:data().name
++    end, parent:children())
++
++    assert.same({
++      "First/ParamFixture.Positive/0",
++      "First/ParamFixture.Positive/1",
++      "Second/ParamFixture.Positive/0",
++    }, names)
++
++    local leaf = assert(tree:get_key(source_id .. "::First/ParamFixture.Positive/1"))
++    local spec = assert(adapter.build_spec({ tree = leaf })[1])
++    local code = lib.process.run(spec.command, { stdout = true })
++    local report = vim.json.decode(lib.files.read(spec.context.results_path))
++
++    assert.equals("--gtest_filter=First/ParamFixture.Positive/1", spec.command[2])
++    assert.equals(0, code)
++    assert.equals(1, report.tests)
++    assert.equals("Positive/1", report.testsuites[1].testsuite[1].name)
++  end)
++
++  it("resolves both methods across two differently sized instantiations", function()
++    local root = vim.uv.cwd() .. "/tests/integration/cpp"
++    local source = root .. "/src/test_two.cpp"
++    local names = inventory.list(root .. "/build/test-executable")
++
++    local by_source = inventory.map_source(parse.parse_positions(source), names)
++
++    assert.same({
++      [source .. "::ParamFixture::Positive"] = {
++        "First/ParamFixture.Positive/0",
++        "First/ParamFixture.Positive/1",
++        "Second/ParamFixture.Positive/0",
++      },
++
++      [source .. "::ParamFixture::Small"] = {
++        "First/ParamFixture.Small/0",
++        "First/ParamFixture.Small/1",
++        "Second/ParamFixture.Small/0",
++      },
++    }, by_source)
++  end)
++
++  it("maps every generated case to one source declaration", function()
++    local root = vim.uv.cwd() .. "/tests/integration/cpp"
++    local source = root .. "/fixtures/param_inventory.cpp"
++    local executable = root .. "/build/test-inventory"
++    local names = inventory.list(executable)
++
++    assert.same({
++      "Pairs/PairFixture.Combined/0",
++      "Pairs/PairFixture.Combined/1",
++      "Pairs/PairFixture.Combined/2",
++      "Pairs/PairFixture.Combined/3",
++
++      "Custom/NamedFixture.Runs/Seven",
++      "Custom/NamedFixture.Runs/Nine",
++
++      "Custom/NamedFixture.Skips/Seven",
++      "Custom/NamedFixture.Skips/Nine",
++
++      "Custom/NamedFixture.DISABLED_NotRun/Seven",
++      "Custom/NamedFixture.DISABLED_NotRun/Nine",
++    }, names)
++
++    local tree = parse.parse_positions(source)
++    local by_source, unmatched = inventory.map_source(tree, names)
++
++    assert.same({}, unmatched)
++
++    assert.same({
++      [source .. "::PairFixture::Combined"] = {
++        "Pairs/PairFixture.Combined/0",
++        "Pairs/PairFixture.Combined/1",
++        "Pairs/PairFixture.Combined/2",
++        "Pairs/PairFixture.Combined/3",
++      },
++
++      [source .. "::NamedFixture::Runs"] = {
++        "Custom/NamedFixture.Runs/Seven",
++        "Custom/NamedFixture.Runs/Nine",
++      },
++
++      [source .. "::NamedFixture::Skips"] = {
++        "Custom/NamedFixture.Skips/Seven",
++        "Custom/NamedFixture.Skips/Nine",
++      },
++
++      [source .. "::NamedFixture::DISABLED_NotRun"] = {
++        "Custom/NamedFixture.DISABLED_NotRun/Seven",
++        "Custom/NamedFixture.DISABLED_NotRun/Nine",
++      },
++
++      [source .. "::EmptyFixture::NeverInstantiated"] = {},
++    }, by_source)
++
++    local code, result = lib.process.run(
++      { "ctest", "--test-dir", root .. "/build", "--show-only=json-v1" },
++      { stdout = true }
++    )
++
++    assert.equals(0, code)
++
++    local ctest_filters = {}
++
++    for _, test in ipairs(vim.json.decode(result.stdout).tests) do
++      if test.command[1] == executable then
++        for _, arg in ipairs(test.command) do
++          local filter = arg:match("^%-%-gtest_filter=(.*)$")
++
++          if filter then
++            ctest_filters[filter] = true
++          end
++        end
++      end
++    end
++
++    for _, name in ipairs(names) do
++      assert.is_true(ctest_filters[name])
++    end
++  end)
++
++  it("keeps a failed compiled instance separate from its passing siblings", function()
++    local root = vim.uv.cwd() .. "/tests/integration/cpp"
++    local source = root .. "/fixtures/param_inventory.cpp"
++    local executable = root .. "/build/test-inventory"
++    local source_id = source .. "::PairFixture::Combined"
++    local names = {
++      "Pairs/PairFixture.Combined/0",
++      "Pairs/PairFixture.Combined/1",
++      "Pairs/PairFixture.Combined/2",
++      "Pairs/PairFixture.Combined/3",
++    }
++    local tree = parse.parse_positions(source, { [source_id] = names })
++
++    local results_path = vim.fn.tempname() .. ".json"
++    local spec = {
++      command = {
++        executable,
++        "--gtest_filter=Pairs/PairFixture.Combined/*",
++        "--gtest_output=json:" .. results_path,
++      },
++      context = {
++        results_path = results_path,
++        name2path = { ["PairFixture.Combined"] = source },
++        position_ids = { source_id },
++      },
++    }
++
++    local code, process_result = lib.process.run(spec.command, { stdout = true })
++    local results = adapter.results(spec, {
++      code = code,
++      output = process_result.stdout,
++    }, tree)
++
++    assert.equals(1, code)
++    assert.equals("failed", results[source_id].status)
++    assert.equals("failed", results[source_id .. "::" .. names[4]].status)
++    assert.matches(
++      "expected only one pair to fail",
++      results[source_id .. "::" .. names[4]].short,
++      1,
++      true
++    )
++
++    for _, index in ipairs({ 1, 2, 3 }) do
++      assert.equals("passed", results[source_id .. "::" .. names[index]].status)
++    end
++  end)
++
++  it("discovers and selects every compiled typed case", function()
++    local root = vim.uv.cwd() .. "/tests/integration/cpp"
++    local source = root .. "/src/test_typed.cpp"
++    local executable = root .. "/build/test-typed"
++    local source_id = source .. "::TypedFixture::Passes"
++    local pattern_source_id = source .. "::PatternFixture::Passes"
++    local expected = {
++      "TypedFixture/Small.Passes",
++      "TypedFixture/Small.FailsWhenRequested",
++      "TypedFixture/Large.Passes",
++      "TypedFixture/Large.FailsWhenRequested",
++
++      "First/PatternFixture/0.Passes",
++      "First/PatternFixture/0.FailsWhenRequested",
++      "First/PatternFixture/1.Passes",
++      "First/PatternFixture/1.FailsWhenRequested",
++
++      "Second/PatternFixture/0.Passes",
++      "Second/PatternFixture/0.FailsWhenRequested",
++      "Second/PatternFixture/1.Passes",
++      "Second/PatternFixture/1.FailsWhenRequested",
++    }
++    local registry = GlobalRegistry:for_dir(root)
++
++    old_root = config.root
++    old_lookup = registry.configured_executable_for
++    old_find_executables = executables.find_executables
++    configured_registry = registry
++
++    config.root = function()
++      return root
++    end
++
++    registry.configured_executable_for = function()
++      return executable
++    end
++
++    executables.find_executables = function(node)
++      return { [executable] = { node:data().id } }, {}
++    end
++
++    local names = inventory.list(executable)
++    local mapped, unmatched = inventory.map_source(parse.parse_positions(source), names)
++    local tree = adapter.discover_positions(source)
++    local parent = assert(tree:get_key(source_id))
++    local leaf = assert(tree:get_key(source_id .. "::TypedFixture/Large.Passes"))
++    local pattern_parent = assert(tree:get_key(pattern_source_id))
++    local pattern_leaf =
++      assert(tree:get_key(pattern_source_id .. "::Second/PatternFixture/1.Passes"))
++    local spec = assert(adapter.build_spec({ tree = leaf, strategy = "dap" })[1])
++    local pattern_spec = assert(adapter.build_spec({ tree = pattern_leaf, strategy = "dap" })[1])
++    local code = lib.process.run(spec.command, { stdout = true })
++    local pattern_code = lib.process.run(pattern_spec.command, { stdout = true })
++    local results = adapter.results(spec, { code = code, output = spec.context.results_path }, tree)
++    local pattern_results = adapter.results(
++      pattern_spec,
++      { code = pattern_code, output = pattern_spec.context.results_path },
++      tree
++    )
++
++    assert.same(expected, names)
++    assert.same({}, unmatched)
++    assert.same({ "TypedFixture/Small.Passes", "TypedFixture/Large.Passes" }, mapped[source_id])
++    assert.same({
++      "First/PatternFixture/0.Passes",
++      "First/PatternFixture/1.Passes",
++      "Second/PatternFixture/0.Passes",
++      "Second/PatternFixture/1.Passes",
++    }, mapped[pattern_source_id])
++    assert.equals(2, #parent:children())
++    assert.equals(4, #pattern_parent:children())
++    assert.equals("--gtest_filter=TypedFixture/Large.Passes", spec.command[2])
++    assert.equals("--gtest_filter=TypedFixture/Large.Passes", spec.strategy.args[1])
++    assert.equals("passed", results[leaf:data().id].status)
++    assert.equals("--gtest_filter=Second/PatternFixture/1.Passes", pattern_spec.command[2])
++    assert.equals("--gtest_filter=Second/PatternFixture/1.Passes", pattern_spec.strategy.args[1])
++    assert.equals("passed", pattern_results[pattern_leaf:data().id].status)
++
++    for _, name in ipairs(expected) do
++      local suite, test_name = name:match("^([^%.]+)%.([^%.]+)$")
++      local source_suite = suite:match("([^/]+)/[^/]+$")
++      local leaf_id = source .. "::" .. source_suite .. "::" .. test_name .. "::" .. name
++      local runtime_leaf = assert(tree:get_key(leaf_id))
++      local runtime_spec = assert(adapter.build_spec({ tree = runtime_leaf })[1])
++
++      assert.equals(executable, runtime_spec.command[1])
++      assert.equals("--gtest_filter=" .. name, runtime_spec.command[2])
++      assert.equals(source, runtime_spec.context.name2path[name])
++    end
++
++    local ctest_code, ctest_output = lib.process.run(
++      { "ctest", "--test-dir", root .. "/build", "--show-only=json-v1" },
++      { stdout = true }
++    )
++    local ctest_filters = {}
++
++    for _, test in ipairs(vim.json.decode(ctest_output.stdout).tests) do
++      if test.command[1] == executable then
++        for _, arg in ipairs(test.command) do
++          local filter = arg:match("^%-%-gtest_filter=(.*)$")
++
++          if filter then
++            ctest_filters[filter] = true
++          end
++        end
++      end
++    end
++
++    assert.equals(0, ctest_code)
++
++    for _, name in ipairs(expected) do
++      assert.is_true(ctest_filters[name])
++    end
++  end)
++end)
+diff --git a/tests/integration/plugin_spec.lua b/tests/integration/plugin_spec.lua
+index ca08dc8..5861fa4 100644
+--- a/tests/integration/plugin_spec.lua
++++ b/tests/integration/plugin_spec.lua
+@@ -1,20 +1,33 @@
+ local neotest = require("neotest")
+ local assert = require("luassert")
+ local it = require("nio.tests").it
++local nio = require("nio")
+ local controller = require("tests.utils.controller")
+ 
+ ---@type neotest-gtest.IntegrationTestsController
+ local state
+ local exe1
+ local exe2
++local exe3
++local exe4
+ local root_id
+ 
+ local function setup()
+   controller.setup()
+   state = controller.state
+ 
++  for _ = 1, 100 do
++    if neotest.state.positions(state.adapter_id) then
++      break
++    end
++
++    nio.sleep(20)
++  end
++
+   exe1 = state.cpp_root .. "/build/test-executable"
+   exe2 = state.cpp_root .. "/build/test-executable2"
++  exe3 = state.cpp_root .. "/build/test-typed"
++  exe4 = state.cpp_root .. "/build/test-isolation"
+   root_id = state.cpp_root .. "/src"
+ end
+ 
+@@ -34,6 +47,91 @@ describe("integration testsuite", function()
+     assert.is_not_nil(tree)
+   end)
+ 
++  it("isolates cases and reports later cases after a child crashes", function()
++    setup()
++
++    local file_id = state:mkid("test_isolation.cpp")
++    local prefix = file_id .. "::Isolation::"
++    local config = require("neotest-gtest.config")
++    local old_isolation = config.process_isolation
++
++    state:configure_executables({ [exe4] = { file_id } })
++    state:run({ args = { file_id } })
++
++    local grouped = state._results_recorder:get_aggregated_results()
++    assert.equals("failed", assert(grouped[prefix .. "BObserveFreshState"]).status)
++    assert.equals("passed", assert(grouped[prefix .. "EAfterCrash"]).status)
++
++    state._results_recorder:reset()
++    state._specs_recorder:reset()
++
++    nio.scheduler()
++    config.process_isolation = true
++    vim.env.NEOTEST_GTEST_ISOLATION_FAILURE = "1"
++    vim.env.NEOTEST_GTEST_ISOLATION_CRASH = "1"
++
++    state:run({ args = { file_id } })
++
++    local specs = state._specs_recorder:await_specs()
++    local isolated = state._results_recorder:get_aggregated_results()
++
++    nio.scheduler()
++    config.process_isolation = old_isolation
++    vim.env.NEOTEST_GTEST_ISOLATION_FAILURE = nil
++    vim.env.NEOTEST_GTEST_ISOLATION_CRASH = nil
++
++    assert.equals(1, #specs)
++    assert.equals(5, #specs[1].context.isolated_cases)
++    assert.equals("passed", assert(isolated[prefix .. "AWriteState"]).status)
++    assert.equals("passed", assert(isolated[prefix .. "BObserveFreshState"]).status)
++    assert.equals("failed", assert(isolated[prefix .. "CFail"]).status)
++    assert.matches("isolated assertion failed", isolated[prefix .. "CFail"].short, 1, true)
++    assert.equals("failed", assert(isolated[prefix .. "DCrash"]).status)
++    assert.equals("passed", assert(isolated[prefix .. "EAfterCrash"]).status)
++
++    local published = state._client:get_results(state.adapter_id)
++    assert.equals("failed", assert(published[file_id .. "::Isolation"]).status)
++    assert.equals("failed", assert(published[file_id]).status)
++  end)
++
++  it("runs parameterized runtime leaves separately through a per-run override", function()
++    setup()
++
++    local file_id = state:mkid("test_two.cpp")
++    local source_id = file_id .. "::ParamFixture::Positive"
++    state:configure_executables({ [exe1] = { file_id } })
++
++    nio.scheduler()
++    vim.cmd.edit(file_id)
++    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = 0 })
++
++    local positions
++    for _ = 1, 100 do
++      positions = neotest.state.positions(state.adapter_id)
++
++      if positions and positions:get_key(source_id .. "::First/ParamFixture.Positive/0") then
++        break
++      end
++
++      nio.sleep(20)
++    end
++
++    assert.is_not_nil(positions:get_key(source_id .. "::First/ParamFixture.Positive/0"))
++
++    state:run({ args = { source_id, process_isolation = true } })
++
++    local specs = state._specs_recorder:await_specs()
++    local results = state._results_recorder:get_aggregated_results()
++    local published = state._client:get_results(state.adapter_id)
++
++    assert.equals(1, #specs)
++    assert.equals(3, #specs[1].context.isolated_cases)
++    assert.equals("passed", assert(results[source_id .. "::First/ParamFixture.Positive/0"]).status)
++    assert.equals("passed", assert(results[source_id .. "::First/ParamFixture.Positive/1"]).status)
++    assert.equals("passed", assert(results[source_id .. "::Second/ParamFixture.Positive/0"]).status)
++    assert.equals("passed", assert(published[source_id]).status)
++  end)
++
+   it("configure and run subtree", function()
+     setup()
+     local id = state:mkid("test_one.cpp")
+@@ -43,6 +141,322 @@ describe("integration testsuite", function()
+     state.ui.notifications:assert_no_other_notifications()
+   end)
+ 
++  it("runs and reports every instance of a parameterized source test", function()
++    setup()
++    local file_id = state:mkid("test_two.cpp")
++    local id = file_id .. "::ParamFixture::Positive"
++    state:configure_executables({ [exe1] = { file_id } })
++    state:run({ args = { id } })
++
++    local results = state._results_recorder:get_aggregated_results()
++    local result = assert(results[id])
++    assert.are.equal("passed", result.status)
++    assert.is_not_nil(result.short:find("First/ParamFixture.Positive/0", 1, true))
++    assert.is_not_nil(result.short:find("First/ParamFixture.Positive/1", 1, true))
++    assert.is_not_nil(result.short:find("Second/ParamFixture.Positive/0", 1, true))
++    state.ui.notifications:assert_no_other_notifications()
++  end)
++
++  it("refreshes parameterized leaves on file save and selects one exact case", function()
++    setup()
++
++    local file_id = state:mkid("test_two.cpp")
++    local source_id = file_id .. "::ParamFixture::Positive"
++    local leaf_id = source_id .. "::First/ParamFixture.Positive/1"
++
++    state:configure_executables({ [exe1] = { file_id } })
++
++    nio.scheduler()
++    vim.cmd.edit(file_id)
++    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = 0 })
++
++    local leaf
++    for _ = 1, 100 do
++      local positions = neotest.state.positions(state.adapter_id)
++      leaf = positions and positions:get_key(leaf_id)
++
++      if leaf then
++        break
++      end
++
++      nio.sleep(20)
++    end
++
++    assert.is_not_nil(leaf)
++    assert.equals(3, #leaf:parent():children())
++
++    nio.scheduler()
++    vim.api.nvim_win_set_cursor(0, { leaf:parent():data().range[1] + 1, 0 })
++
++    local nearest = neotest.run.get_tree_from_args()
++    assert.equals(source_id, assert(nearest):data().id)
++
++    local dap_spec = assert(require("neotest-gtest").build_spec({
++      tree = leaf,
++      strategy = "dap",
++    })[1])
++
++    assert.equals(exe1, dap_spec.strategy.program)
++    assert.equals("--gtest_filter=First/ParamFixture.Positive/1", dap_spec.strategy.args[1])
++
++    local summary = require("neotest.consumers.summary")
++    summary.open()
++    summary:expand(source_id, true)
++
++    local summary_text
++    for _ = 1, 100 do
++      for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
++        if vim.bo[buffer].filetype == "neotest-summary" then
++          summary_text = table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n")
++          break
++        end
++      end
++
++      if summary_text and summary_text:find("Second/ParamFixture.Positive/0", 1, true) then
++        break
++      end
++
++      nio.sleep(20)
++    end
++
++    assert.is_not_nil(summary_text)
++    assert.is_not_nil(summary_text:find("First/ParamFixture.Positive/0", 1, true))
++    assert.is_not_nil(summary_text:find("First/ParamFixture.Positive/1", 1, true))
++    assert.is_not_nil(summary_text:find("Second/ParamFixture.Positive/0", 1, true))
++
++    summary.close()
++
++    state:run({ args = { leaf_id } })
++    local specs = state._specs_recorder:await_specs()
++
++    assert.equals(1, #specs)
++    assert.equals(exe1, specs[1].command[1])
++    assert.equals("--gtest_filter=First/ParamFixture.Positive/1", specs[1].command[2])
++
++    local results = state._results_recorder:get_aggregated_results()
++    assert.equals("passed", assert(results[leaf_id]).status)
++
++    state._specs_recorder:reset()
++    state._results_recorder:reset()
++
++    state:run({ args = { source_id } })
++
++    local parent_specs = state._specs_recorder:await_specs()
++    local parent_results = state._results_recorder:get_aggregated_results()
++    local report =
++      vim.json.decode(require("neotest.lib").files.read(parent_specs[1].context.results_path))
++
++    assert.equals(3, report.tests)
++    assert.equals("passed", assert(parent_results[source_id]).status)
++    assert.equals("passed", assert(parent_results[leaf_id]).status)
++
++    state._specs_recorder:reset()
++    state._results_recorder:reset()
++
++    nio.scheduler()
++    vim.env.NEOTEST_GTEST_FAIL_PARAM = "1"
++    state:run({ args = { source_id } })
++    local failing_results = state._results_recorder:get_aggregated_results()
++
++    nio.scheduler()
++    vim.env.NEOTEST_GTEST_FAIL_PARAM = nil
++
++    assert.equals("failed", assert(failing_results[source_id]).status)
++    assert.equals("failed", assert(failing_results[leaf_id]).status)
++    assert.matches("selected parameter failed", failing_results[leaf_id].short, 1, true)
++    assert.equals(
++      "passed",
++      assert(failing_results[source_id .. "::First/ParamFixture.Positive/0"]).status
++    )
++    assert.equals(
++      "passed",
++      assert(failing_results[source_id .. "::Second/ParamFixture.Positive/0"]).status
++    )
++
++    state._specs_recorder:reset()
++    state._results_recorder:reset()
++
++    state:run({ args = { file_id } })
++
++    local file_specs = state._specs_recorder:await_specs()
++    state._results_recorder:get_aggregated_results()
++
++    local file_report =
++      vim.json.decode(require("neotest.lib").files.read(file_specs[1].context.results_path))
++    local seen = {}
++
++    for _, suite in ipairs(file_report.testsuites) do
++      for _, test in ipairs(suite.testsuite) do
++        local name = suite.name .. "." .. test.name
++        assert.is_nil(seen[name])
++        seen[name] = true
++      end
++    end
++
++    assert.equals(9, file_report.tests)
++    assert.equals(9, vim.tbl_count(seen))
++    assert.is_true(seen["First/ParamFixture.Positive/0"])
++    assert.is_true(seen["First/ParamFixture.Positive/1"])
++    assert.is_true(seen["Second/ParamFixture.Positive/0"])
++  end)
++
++  it("selects and reports both typed families in a Neotest session", function()
++    setup()
++
++    local file_id = state:mkid("test_typed.cpp")
++    local typed_id = file_id .. "::TypedFixture::Passes"
++    local pattern_id = file_id .. "::PatternFixture::Passes"
++    local typed_leaf_id = typed_id .. "::TypedFixture/Large.Passes"
++    local pattern_leaf_id = pattern_id .. "::Second/PatternFixture/1.Passes"
++
++    state:configure_executables({ [exe3] = { file_id } })
++
++    nio.scheduler()
++    vim.cmd.edit(file_id)
++    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = 0 })
++
++    local positions
++    for _ = 1, 100 do
++      positions = neotest.state.positions(state.adapter_id)
++
++      if positions and positions:get_key(typed_leaf_id) and positions:get_key(pattern_leaf_id) then
++        break
++      end
++
++      nio.sleep(20)
++    end
++
++    local typed_source = assert(positions:get_key(typed_id))
++    local pattern_source = assert(positions:get_key(pattern_id))
++    local typed_leaf = assert(positions:get_key(typed_leaf_id))
++    local pattern_leaf = assert(positions:get_key(pattern_leaf_id))
++
++    assert.equals(2, #typed_source:children())
++    assert.equals(4, #pattern_source:children())
++
++    local summary = require("neotest.consumers.summary")
++    summary.open()
++    summary:expand(typed_id, true)
++    summary:expand(pattern_id, true)
++
++    local summary_text
++    for _ = 1, 100 do
++      for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
++        if vim.bo[buffer].filetype == "neotest-summary" then
++          summary_text = table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n")
++          break
++        end
++      end
++
++      if summary_text and summary_text:find("Second/PatternFixture/1.Passes", 1, true) then
++        break
++      end
++
++      nio.sleep(20)
++    end
++
++    assert.is_not_nil(summary_text)
++    assert.is_not_nil(summary_text:find("TypedFixture/Large.Passes", 1, true))
++    assert.is_not_nil(summary_text:find("First/PatternFixture/0.Passes", 1, true))
++    assert.is_not_nil(summary_text:find("Second/PatternFixture/1.Passes", 1, true))
++
++    summary.close()
++
++    for _, source in ipairs({ typed_source, pattern_source }) do
++      nio.scheduler()
++      vim.api.nvim_win_set_cursor(0, { source:data().range[1] + 1, 0 })
++
++      local nearest = neotest.run.get_tree_from_args()
++      assert.equals(source:data().id, assert(nearest):data().id)
++    end
++
++    for _, leaf in ipairs({ typed_leaf, pattern_leaf }) do
++      local dap_spec = assert(require("neotest-gtest").build_spec({
++        tree = leaf,
++        strategy = "dap",
++      })[1])
++
++      assert.equals(exe3, dap_spec.strategy.program)
++      assert.equals("--gtest_filter=" .. leaf:data().name, dap_spec.strategy.args[1])
++
++      state._specs_recorder:reset()
++      state._results_recorder:reset()
++      state:run({ args = { leaf:data().id } })
++
++      local specs = state._specs_recorder:await_specs()
++      local results = state._results_recorder:get_aggregated_results()
++
++      assert.equals(1, #specs)
++      assert.equals("--gtest_filter=" .. leaf:data().name, specs[1].command[2])
++      assert.equals("passed", assert(results[leaf:data().id]).status)
++    end
++
++    for _, source in ipairs({ typed_source, pattern_source }) do
++      state._specs_recorder:reset()
++      state._results_recorder:reset()
++      state:run({ args = { source:data().id } })
++
++      local specs = state._specs_recorder:await_specs()
++      local results = state._results_recorder:get_aggregated_results()
++      local report =
++        vim.json.decode(require("neotest.lib").files.read(specs[1].context.results_path))
++
++      assert.equals(#source:children(), report.tests)
++      assert.equals("passed", assert(results[source:data().id]).status)
++    end
++
++    state._specs_recorder:reset()
++    state._results_recorder:reset()
++
++    nio.scheduler()
++    vim.env.NEOTEST_GTEST_FAIL_TYPED = "1"
++    state:run({ args = { file_id } })
++    local failed_results = state._results_recorder:get_aggregated_results()
++
++    nio.scheduler()
++    vim.env.NEOTEST_GTEST_FAIL_TYPED = nil
++
++    local typed_failure = file_id .. "::TypedFixture::FailsWhenRequested"
++    local pattern_failure = file_id .. "::PatternFixture::FailsWhenRequested"
++
++    assert.equals("failed", assert(failed_results[typed_failure]).status)
++    assert.equals("failed", assert(failed_results[pattern_failure]).status)
++    assert.equals(
++      "failed",
++      assert(failed_results[typed_failure .. "::TypedFixture/Large.FailsWhenRequested"]).status
++    )
++    assert.equals(
++      "failed",
++      assert(failed_results[pattern_failure .. "::First/PatternFixture/1.FailsWhenRequested"]).status
++    )
++    assert.matches(
++      "selected type pattern failed",
++      failed_results[pattern_failure .. "::First/PatternFixture/1.FailsWhenRequested"].short,
++      1,
++      true
++    )
++    assert.is_not_nil(
++      failed_results[pattern_failure .. "::First/PatternFixture/1.FailsWhenRequested"].errors[1].line
++    )
++    assert.equals(
++      "passed",
++      assert(failed_results[pattern_failure .. "::Second/PatternFixture/1.FailsWhenRequested"]).status
++    )
++
++    state._specs_recorder:reset()
++    state._results_recorder:reset()
++    state:run({ args = { file_id } })
++
++    local file_specs = state._specs_recorder:await_specs()
++    local file_results = state._results_recorder:get_aggregated_results()
++    local file_report =
++      vim.json.decode(require("neotest.lib").files.read(file_specs[1].context.results_path))
++
++    assert.equals(12, file_report.tests)
++    assert.equals("passed", assert(file_results[typed_leaf_id]).status)
++    assert.equals("passed", assert(file_results[pattern_leaf_id]).status)
++  end)
++
+   it("unconfigured run throws an error", function()
+     setup()
+     local id = state:mkid("test_two.cpp")
+@@ -74,7 +488,8 @@ describe("integration testsuite", function()
+     state:configure_executables({ [exe1] = { root_id } })
+     state:run({ args = { root_id } })
+     state:assert_results_published({ state:mkid("test_one.cpp"), state:mkid("test_two.cpp") })
+-    assert_notified_id_not_found(state:mkid("subdirectory/test_three.cpp"))
++    state.ui.notifications:assert_notified("test_three.cpp", vim.log.levels.WARN)
++    state.ui.notifications:assert_notified("test_typed.cpp", vim.log.levels.WARN)
+   end)
+ 
+   it("configure wrong executable (specific test)", function()
+@@ -95,14 +510,18 @@ describe("with configured tree", function()
+       state:mkid("subdirectory/test_three.cpp"),
+       state:mkid("test_two.cpp"),
+       state:mkid("test_one.cpp"),
++      state:mkid("test_typed.cpp"),
++      state:mkid("test_isolation.cpp"),
+     }
+     state:configure_executables({ [exe1] = { root_id } })
+     state:configure_executables({ [exe2] = { all_ids[1] } })
++    state:configure_executables({ [exe3] = { all_ids[4] } })
++    state:configure_executables({ [exe4] = { all_ids[5] } })
+   end
+ 
+   it("configure whole tree and then subtree + run whole tree", function()
+     with_configured_tree()
+-    state:run({ args = { root_id }, expected_specs = 2 })
++    state:run({ args = { root_id }, expected_specs = 4 })
+     state._specs_recorder:await_specs()
+     state:assert_results_published(all_ids)
+     state.ui.notifications:assert_no_other_notifications()
+@@ -124,22 +543,29 @@ describe("configure all", function()
+     -- Setup and run configure_all to map all files to their executables.
+     --
+     setup()
+-    local one, two, three =
++    local one, two, three, typed, isolation =
+       state:mkid("test_one.cpp"),
+       state:mkid("test_two.cpp"),
+-      state:mkid("subdirectory/test_three.cpp")
+-    state:verify_unconfigured({ one, two, three })
++      state:mkid("subdirectory/test_three.cpp"),
++      state:mkid("test_typed.cpp"),
++      state:mkid("test_isolation.cpp")
++    state:verify_unconfigured({ one, two, three, typed, isolation })
+     ctest.configure_all().wait()
+-    state:verify_configured({ [exe1] = { one, two }, [exe2] = { three } })
+-    state.ui.notifications:assert_notified("mapped 3 files", vim.log.levels.INFO)
++    state:verify_configured({
++      [exe1] = { one, two },
++      [exe2] = { three },
++      [exe3] = { typed },
++      [exe4] = { isolation },
++    })
++    state.ui.notifications:assert_notified("mapped 5 files", vim.log.levels.INFO)
+     state.ui.notifications:assert_no_other_notifications()
+ 
+     --
+     -- Run all tests and verify that they are executed successfully.
+     --
+-    state:run({ args = { root_id }, expected_specs = 2 })
++    state:run({ args = { root_id }, expected_specs = 4 })
+     state._specs_recorder:await_specs()
+-    state:assert_results_published({ one, two, three })
++    state:assert_results_published({ one, two, three, typed, isolation })
+   end)
+ 
+   it("runs the mapped files and warns about the unmapped ones", function()
+diff --git a/tests/unit/ctest_spec.lua b/tests/unit/ctest_spec.lua
+index 270630e..f070766 100644
+--- a/tests/unit/ctest_spec.lua
++++ b/tests/unit/ctest_spec.lua
+@@ -43,6 +43,32 @@ describe("pick_executable", function()
+   it("leaves a file whose tests are in no binary unmapped", function()
+     assert.is_nil(ctest._pick_executable({ [A] = set({ "S.t1" }) }, { "Other.t" }, "a_tests"))
+   end)
++
++  it("matches parameterized instances to their source test", function()
++    local exe2tests = {
++      [A] = set({ "First/Fixture.Case/0", "First/Fixture.Case/1" }),
++      [B] = set({ "Other.Case" }),
++    }
++    assert.equals(A, ctest._pick_executable(exe2tests, { "Fixture.Case" }, nil))
++  end)
++
++  it("matches typed runtime suites to their source tests", function()
++    local exe2tests = {
++      [A] = set({ "TypedFixture/Small.Passes", "TypedFixture/Large.Passes" }),
++      [B] = set({ "Other.Case" }),
++    }
++
++    assert.equals(A, ctest._pick_executable(exe2tests, { "TypedFixture.Passes" }, nil))
++  end)
++
++  it("matches type-parameterized instantiations to their source tests", function()
++    local exe2tests = {
++      [A] = set({ "First/PatternFixture/0.Works", "Second/PatternFixture/1.Works" }),
++      [B] = set({ "Other.Case" }),
++    }
++
++    assert.equals(A, ctest._pick_executable(exe2tests, { "PatternFixture.Works" }, nil))
++  end)
+ end)
+ 
+ describe("parse_ctest_json", function()
+diff --git a/tests/unit/discovery_spec.lua b/tests/unit/discovery_spec.lua
+new file mode 100644
+index 0000000..931589b
+--- /dev/null
++++ b/tests/unit/discovery_spec.lua
+@@ -0,0 +1,80 @@
++local assert = require("luassert")
++local it = require("nio.tests").it
++local MockProject = require("tests.utils.mock_project")
++local adapter = require("neotest-gtest")
++local config = require("neotest-gtest.config")
++local inventory = require("neotest-gtest.executables.inventory")
++
++describe("runtime position discovery", function()
++  local old_root
++  local old_list
++
++  before_each(function()
++    old_root = config.root
++    old_list = inventory.list
++  end)
++
++  after_each(function()
++    config.root = old_root
++    inventory.list = old_list
++  end)
++
++  it("keeps same named sources in different executables separate", function()
++    local project = MockProject:new()
++    project:set_contents({
++      ["test_one.cpp"] = "TEST_P(Fixture, Runs) {}",
++      ["test_two.cpp"] = "TEST_P(Fixture, Runs) {}",
++    })
++    project:set_executables({
++      ["test_one.cpp"] = "/bin/one",
++      ["test_two.cpp"] = "/bin/two",
++    })
++    config.root = function()
++      return project:root()
++    end
++
++    inventory.list = function(executable)
++      if executable == "/bin/one" then
++        return { "One/Fixture.Runs/Alpha" }
++      end
++
++      return { "Two/Fixture.Runs/Beta" }
++    end
++
++    local one = adapter.discover_positions(project:root() .. "/test_one.cpp")
++    local two = adapter.discover_positions(project:root() .. "/test_two.cpp")
++    local one_source = assert(one:get_key(project:root() .. "/test_one.cpp::Fixture::Runs"))
++    local two_source = assert(two:get_key(project:root() .. "/test_two.cpp::Fixture::Runs"))
++
++    assert.same(
++      { "One/Fixture.Runs/Alpha" },
++      vim.tbl_map(function(node)
++        return node:data().name
++      end, one_source:children())
++    )
++    assert.same(
++      { "Two/Fixture.Runs/Beta" },
++      vim.tbl_map(function(node)
++        return node:data().name
++      end, two_source:children())
++    )
++  end)
++
++  it("retains sources when their executable is not configured", function()
++    local project = MockProject:new()
++    project:set_contents({ ["test_one.cpp"] = "TEST_P(Fixture, Runs) {}" })
++    config.root = function()
++      return project:root()
++    end
++
++    inventory.list = function()
++      error("inventory must not run without an executable")
++    end
++
++    local file = project:root() .. "/test_one.cpp"
++    local tree = adapter.discover_positions(file)
++    local source = assert(tree:get_key(file .. "::Fixture::Runs"))
++
++    assert.equals(0, #source:children())
++  end)
++end)
+diff --git a/tests/unit/executables_spec.lua b/tests/unit/executables_spec.lua
+index 114df50..da053cc 100644
+--- a/tests/unit/executables_spec.lua
++++ b/tests/unit/executables_spec.lua
+@@ -88,6 +88,13 @@ describe("executables with single test in file", function()
+     assert_executables_for_node(test_id, { ["/bin/exe1"] = { test_id } })
+   end)
+ 
++  it("resolves a configured source without requiring a Neotest tree refresh", function()
++    setup()
++    registry:update_executable(file_id, "/bin/exe1")
++    registry._tree = nil
++    assert.equals("/bin/exe1", registry:configured_executable_for(test_id))
++  end)
++
+   it("executables mapping is persisted via the storage", function()
+     setup()
+     registry:update_executable(file_id, "/bin/exe1")
+diff --git a/tests/unit/inventory_spec.lua b/tests/unit/inventory_spec.lua
+new file mode 100644
+index 0000000..0b29a32
+--- /dev/null
++++ b/tests/unit/inventory_spec.lua
+@@ -0,0 +1,110 @@
++local assert = require("luassert")
++local inventory = require("neotest-gtest.executables.inventory")
++local tree_utils = require("tests.utils.tree")
++local it = require("nio.tests").it
++
++describe("Google Test runtime inventory", function()
++  it("parses full compiled names and ignores parameter comments", function()
++    local output = [[
++Running main() from /build/gtest_main.cc
++First/ParamFixture.
++  Positive/0  # GetParam() = 0
++  Positive/1  # GetParam() = 1
++
++Second/ParamFixture.
++  Positive/0  # GetParam() = 2
++
++Custom/NamedFixture.
++  Named/Alpha  # GetParam() = 10
++  DISABLED_Named/Beta  # GetParam() = 20
++]]
++
++    assert.same({
++      "First/ParamFixture.Positive/0",
++      "First/ParamFixture.Positive/1",
++
++      "Second/ParamFixture.Positive/0",
++
++      "Custom/NamedFixture.Named/Alpha",
++      "Custom/NamedFixture.DISABLED_Named/Beta",
++    }, inventory.parse_list(output))
++  end)
++
++  it("maps compiled instances to one source declaration and retains zero-instance tests", function()
++    local tree = tree_utils.make_directory_tree({
++      ["test_inventory.cpp"] = [[
++        TEST_P(ParamFixture, Positive) {}
++        TEST_P(ParamFixture, Other) {}
++
++        TEST_P(EmptyFixture, NeverInstantiated) {}
++      ]],
++    })
++
++    local file = tree:children()[1]:data().path
++
++    local by_source, unmatched = inventory.map_source(tree, {
++      "First/ParamFixture.Positive/0",
++      "Second/ParamFixture.Positive/0",
++      "First/ParamFixture.Other/0",
++
++      "Unknown.Case",
++    })
++
++    assert.same({
++      [file .. "::ParamFixture::Positive"] = {
++        "First/ParamFixture.Positive/0",
++        "Second/ParamFixture.Positive/0",
++      },
++
++      [file .. "::ParamFixture::Other"] = { "First/ParamFixture.Other/0" },
++
++      [file .. "::EmptyFixture::NeverInstantiated"] = {},
++    }, by_source)
++
++    assert.same({ "Unknown.Case" }, unmatched)
++  end)
++
++  it("maps typed cases with numeric and custom type names", function()
++    local tree = tree_utils.make_directory_tree({
++      ["test_typed.cpp"] = "TYPED_TEST(TypedFixture, Works) {}",
++    })
++    local file = tree:children()[1]:data().path
++
++    local by_source, unmatched = inventory.map_source(tree, {
++      "TypedFixture/0.Works",
++      "TypedFixture/Long.Works",
++      "OtherFixture/0.Works",
++    })
++
++    assert.same({
++      [file .. "::TypedFixture::Works"] = {
++        "TypedFixture/0.Works",
++        "TypedFixture/Long.Works",
++      },
++    }, by_source)
++    assert.same({ "OtherFixture/0.Works" }, unmatched)
++  end)
++
++  it("maps type-parameterized cases from separate instantiations", function()
++    local tree = tree_utils.make_directory_tree({
++      ["test_typed.cpp"] = "TYPED_TEST_P(PatternFixture, Works) {}",
++    })
++    local file = tree:children()[1]:data().path
++
++    local by_source, unmatched = inventory.map_source(tree, {
++      "First/PatternFixture/0.Works",
++      "First/PatternFixture/1.Works",
++      "Second/PatternFixture/0.Works",
++      "Other/PatternFixture/0.Unknown",
++    })
++
++    assert.same({
++      [file .. "::PatternFixture::Works"] = {
++        "First/PatternFixture/0.Works",
++        "First/PatternFixture/1.Works",
++        "Second/PatternFixture/0.Works",
++      },
++    }, by_source)
++    assert.same({ "Other/PatternFixture/0.Unknown" }, unmatched)
++  end)
++end)
+diff --git a/tests/unit/neotest_adapter_spec.lua b/tests/unit/neotest_adapter_spec.lua
+index 1ca4391..9088b1e 100644
+--- a/tests/unit/neotest_adapter_spec.lua
++++ b/tests/unit/neotest_adapter_spec.lua
+@@ -2,6 +2,9 @@ local config = require("neotest-gtest.config")
+ local executables = require("neotest-gtest.executables")
+ local neotest_spec_utils = require("tests.utils.neotest_spec")
+ local it = require("nio").tests.it
++local parse = require("neotest-gtest.parse")
++local lib = require("neotest.lib")
++local NeotestAdapter = require("neotest-gtest.neotest_adapter")
+ 
+ local MOCK_EXECUTABLE = "/build/some-gtest-executable"
+ 
+@@ -97,6 +100,228 @@ describe("adapter spec", function()
+     )
+   end)
+ 
++  it("builds filters for all instances of a parameterized test", function()
++    with_mock_executable_for_nodes({ "Fixture::Case" })
++
++    neotest_spec_utils.assert_spec_for_file([[TEST_P(Fixture, Case) {}]], {
++      input_key = "Fixture::Case",
++      command = {
++        MOCK_EXECUTABLE,
++        "--gtest_filter=*/Fixture.Case/*:Fixture.Case/*",
++      },
++      allow_extra_args = true,
++    })
++  end)
++
++  it("uses one exact compiled name for a runtime leaf and its DAP run", function()
++    local file = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = file .. "::Fixture::Case"
++    local runtime_name = "Custom/Fixture.Case/Alpha"
++
++    lib.files.write(file, "TEST_P(Fixture, Case) {}")
++
++    local tree = parse.parse_positions(file, { [source_id] = { runtime_name } })
++    local leaf = assert(tree:get_key(source_id .. "::" .. runtime_name))
++
++    executables.find_executables = function()
++      return { [MOCK_EXECUTABLE] = { leaf:data().id } }, {}
++    end
++
++    for _, strategy in ipairs({ "integrated", "dap" }) do
++      local spec = assert(NeotestAdapter:new({ tree = leaf, strategy = strategy }):build_specs()[1])
++
++      assert.equals("--gtest_filter=" .. runtime_name, spec.command[2])
++      assert.equals(MOCK_EXECUTABLE, spec.command[1])
++      assert.equals(file, spec.context.name2path[runtime_name])
++      assert.same({ leaf:data().id }, spec.context.position_ids)
++
++      if strategy == "dap" then
++        assert.equals(MOCK_EXECUTABLE, spec.strategy.program)
++        assert.equals("--gtest_filter=" .. runtime_name, spec.strategy.args[1])
++      end
++    end
++  end)
++
++  it("runs and debugs typed leaves by exact name and runs their source parent", function()
++    local file = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = file .. "::TypedFixture::Works"
++    local names = { "TypedFixture/Small.Works", "TypedFixture/Large.Works" }
++
++    lib.files.write(file, "TYPED_TEST(TypedFixture, Works) {}")
++
++    local tree = parse.parse_positions(file, { [source_id] = names })
++    local parent = assert(tree:get_key(source_id))
++    local leaf = assert(tree:get_key(source_id .. "::" .. names[1]))
++
++    executables.find_executables = function(node)
++      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
++    end
++
++    local leaf_spec = assert(NeotestAdapter:new({ tree = leaf, strategy = "dap" }):build_specs()[1])
++    local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
++
++    assert.equals("--gtest_filter=" .. names[1], leaf_spec.command[2])
++    assert.equals("--gtest_filter=" .. names[1], leaf_spec.strategy.args[1])
++    assert.equals(file, leaf_spec.context.name2path[names[1]])
++    assert.equals("--gtest_filter=" .. table.concat(names, ":"), parent_spec.command[2])
++  end)
++
++  it("runs type-parameterized leaves by exact name across instantiations", function()
++    local file = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = file .. "::PatternFixture::Works"
++    local names = {
++      "First/PatternFixture/0.Works",
++      "Second/PatternFixture/0.Works",
++    }
++
++    lib.files.write(file, "TYPED_TEST_P(PatternFixture, Works) {}")
++
++    local tree = parse.parse_positions(file, { [source_id] = names })
++    local parent = assert(tree:get_key(source_id))
++    local leaf = assert(tree:get_key(source_id .. "::" .. names[2]))
++
++    executables.find_executables = function(node)
++      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
++    end
++
++    local leaf_spec = assert(NeotestAdapter:new({ tree = leaf, strategy = "dap" }):build_specs()[1])
++    local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
++
++    assert.equals("--gtest_filter=" .. names[2], leaf_spec.command[2])
++    assert.equals("--gtest_filter=" .. names[2], leaf_spec.strategy.args[1])
++    assert.equals("--gtest_filter=" .. table.concat(names, ":"), parent_spec.command[2])
++  end)
++
++  it("keeps parent and file selection over all compiled instances", function()
++    local file = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = file .. "::Fixture::Case"
++
++    lib.files.write(file, "TEST_P(Fixture, Case) {}")
++
++    local tree = parse.parse_positions(file, {
++      [source_id] = { "First/Fixture.Case/0", "Second/Fixture.Case/Custom" },
++    })
++
++    executables.find_executables = function(node)
++      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
++    end
++
++    local parent = assert(tree:get_key(source_id))
++    local parent_spec = assert(NeotestAdapter:new({ tree = parent }):build_specs()[1])
++    local file_spec = assert(NeotestAdapter:new({ tree = tree }):build_specs()[1])
++
++    assert.equals(file, parent_spec.context.name2path["First/Fixture.Case/0"])
++    assert.equals(file, file_spec.context.name2path["Second/Fixture.Case/Custom"])
++
++    assert.equals("--gtest_filter=*/Fixture.Case/*:Fixture.Case/*", parent_spec.command[2])
++    assert.equals("--gtest_filter=Fixture.*:*/Fixture.Case/*:Fixture.Case/*", file_spec.command[2])
++  end)
++
++  it("builds one isolated process for each compiled case with distinct reports", function()
++    local file = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = file .. "::Fixture::Case"
++    local names = { "First/Fixture.Case/0", "First/Fixture.Case/1" }
++
++    lib.files.write(
++      file,
++      [[
++      TEST(Other, Plain) {}
++      TEST_P(Fixture, Case) {}
++    ]]
++    )
++
++    local tree = parse.parse_positions(file, { [source_id] = names })
++
++    executables.find_executables = function(node)
++      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
++    end
++
++    local grouped = NeotestAdapter:new({ tree = tree }):build_specs()
++    local isolated = NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
++
++    assert.equals(1, #grouped)
++    assert.equals(1, #isolated)
++    assert.is_function(isolated[1].strategy)
++
++    local cases = isolated[1].context.isolated_cases
++    assert.equals(3, #cases)
++
++    local filters = {}
++    local reports = {}
++    local report_dirs = {}
++    for _, case in ipairs(cases) do
++      assert.equals(MOCK_EXECUTABLE, case.command[1])
++      assert.equals(1, #case.context.position_ids)
++
++      filters[case.command[2]] = true
++      reports[case.context.results_path] = true
++      report_dirs[vim.fn.fnamemodify(case.context.results_path, ":h")] = true
++    end
++
++    assert.same({
++      ["--gtest_filter=Other.Plain"] = true,
++      ["--gtest_filter=First/Fixture.Case/0"] = true,
++      ["--gtest_filter=First/Fixture.Case/1"] = true,
++    }, filters)
++    assert.equals(3, vim.tbl_count(reports))
++    assert.equals(1, vim.tbl_count(report_dirs))
++  end)
++
++  it("requires a refreshed runtime inventory for isolated generated cases", function()
++    local file = assert(vim.fn.tempname()) .. ".cpp"
++    lib.files.write(file, "TEST_P(Fixture, Case) {}")
++
++    local tree = parse.parse_positions(file)
++
++    executables.find_executables = function(node)
++      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
++    end
++
++    local ok, err = pcall(function()
++      NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
++    end)
++
++    assert.is_false(ok)
++    assert.matches("Process isolation requires compiled case inventory", err, 1, true)
++  end)
++
++  it("rejects one spec that maps the same runtime name to two source files", function()
++    local first_file = assert(vim.fn.tempname()) .. ".cpp"
++    local second_file = assert(vim.fn.tempname()) .. ".cpp"
++    local runtime_name = "Same/Fixture.Case/0"
++    lib.files.write(first_file, "TEST_P(Fixture, Case) {}")
++    lib.files.write(second_file, "TEST_P(Fixture, Case) {}")
++
++    local first_source = first_file .. "::Fixture::Case"
++    local second_source = second_file .. "::Fixture::Case"
++    local first_tree = parse.parse_positions(first_file, { [first_source] = { runtime_name } })
++    local second_tree = parse.parse_positions(second_file, { [second_source] = { runtime_name } })
++    local adapter = NeotestAdapter:new({ tree = first_tree })
++
++    assert.has_error(function()
++      adapter:_map_names_to_paths({
++        assert(first_tree:get_key(first_source)),
++        assert(second_tree:get_key(second_source)),
++      })
++    end, "Conflicting executable mappings for " .. runtime_name)
++  end)
++
++  it("includes parameterized tests when running a namespace", function()
++    with_mock_executable_for_nodes({ "Fixture" })
++
++    neotest_spec_utils.assert_spec_for_file(
++      [[
++      TEST_F(Fixture, Ordinary) {}
++      TEST_P(Fixture, Case) {}
++      ]],
++      {
++        input_key = "Fixture",
++        command = { MOCK_EXECUTABLE, "--gtest_filter=Fixture.*:*/Fixture.Case/*:Fixture.Case/*" },
++        allow_extra_args = true,
++      }
++    )
++  end)
++
+   it("builds command for a file with two namespaces", function()
+     with_mock_executable_for_nodes({ "TestOne", "TestTwo" })
+ 
+diff --git a/tests/unit/parse_spec.lua b/tests/unit/parse_spec.lua
+index 9545968..b91f8e9 100644
+--- a/tests/unit/parse_spec.lua
++++ b/tests/unit/parse_spec.lua
+@@ -151,6 +151,133 @@ describe("config library", function()
+     )
+   end)
+ 
++  it("shows TEST_P as a test position", function()
++    assert_parses_as(
++      [[
++      TEST_P(ParamFixture, Positive) {
++        EXPECT_GE(GetParam(), 0);
++      }
++      ]],
++      {
++        {
++          name = "ParamFixture",
++          children = {
++            { name = "Positive", line_range = { 0, 2 }, kind = "TEST_P" },
++          },
++        },
++      }
++    )
++  end)
++
++  it("shows TYPED_TEST as a source position with exact runtime leaves", function()
++    local fpath = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = fpath .. "::TypedFixture::Works"
++    local runtime_names = { "TypedFixture/Small.Works", "TypedFixture/Large.Works" }
++
++    lib.files.write(
++      fpath,
++      [[
++TYPED_TEST(TypedFixture, Works) {
++  EXPECT_TRUE(true);
++}
++]]
++    )
++
++    local tree = parse_module.parse_positions(fpath, {
++      [source_id] = runtime_names,
++    })
++    local source = assert(tree:get_key(source_id))
++
++    assert.equals("TYPED_TEST", source:data().extra.kind)
++    assert.equals(2, #source:children())
++    for _, name in ipairs(runtime_names) do
++      local leaf = assert(tree:get_key(source_id .. "::" .. name))
++
++      assert.equals(name, leaf:data().extra.runtime_name)
++      assert.equals("TYPED_TEST", leaf:data().extra.kind)
++    end
++  end)
++
++  it("shows TYPED_TEST_P with leaves from multiple instantiations", function()
++    local fpath = assert(vim.fn.tempname()) .. ".cpp"
++    local source_id = fpath .. "::PatternFixture::Works"
++    local runtime_names = {
++      "First/PatternFixture/0.Works",
++      "First/PatternFixture/1.Works",
++      "Second/PatternFixture/0.Works",
++    }
++
++    lib.files.write(fpath, "TYPED_TEST_P(PatternFixture, Works) {}")
++
++    local tree = parse_module.parse_positions(fpath, {
++      [source_id] = runtime_names,
++    })
++    local source = assert(tree:get_key(source_id))
++
++    assert.equals("TYPED_TEST_P", source:data().extra.kind)
++    assert.equals(3, #source:children())
++
++    for _, name in ipairs(runtime_names) do
++      local leaf = assert(tree:get_key(source_id .. "::" .. name))
++
++      assert.equals(name, leaf:data().extra.runtime_name)
++      assert.equals("TYPED_TEST_P", leaf:data().extra.kind)
++    end
++  end)
++
++  it("adds exact runtime children beneath their source declarations", function()
++    local source = [[
++      TEST_P(ParamFixture, Positive) {}
++      TEST_P(ParamFixture, Small) {}
++    ]]
++    local fpath = assert(vim.fn.tempname()) .. ".cpp"
++
++    lib.files.write(fpath, source)
++
++    local tree = parse_module.parse_positions(fpath, {
++      [fpath .. "::ParamFixture::Positive"] = {
++        "First/ParamFixture.Positive/0",
++        "First/ParamFixture.Positive/1",
++        "Second/ParamFixture.Positive/0",
++      },
++      [fpath .. "::ParamFixture::Small"] = {
++        "First/ParamFixture.Small/0",
++        "Second/ParamFixture.Small/0",
++      },
++    })
++
++    local positive = assert(tree:get_key(fpath .. "::ParamFixture::Positive"))
++    local small = assert(tree:get_key(fpath .. "::ParamFixture::Small"))
++
++    assert.equals(3, #positive:children())
++    assert.equals(2, #small:children())
++
++    for _, child in ipairs(positive:children()) do
++      local data = child:data()
++
++      assert.equals("test", data.type)
++      assert.equals(positive:data().id .. "::" .. data.name, data.id)
++      assert.equals(data.name, data.extra.runtime_name)
++      assert.equals("TEST_P", data.extra.kind)
++    end
++
++    assert.equals(
++      positive:data().id,
++      lib.positions.nearest(tree, positive:data().range[1]):data().id
++    )
++  end)
++
++  it("keeps an unconfigured TEST_P source without invented children", function()
++    local fpath = assert(vim.fn.tempname()) .. ".cpp"
++
++    lib.files.write(fpath, "TEST_P(ParamFixture, Positive) {}")
++
++    local tree = parse_module.parse_positions(fpath)
++    local source = assert(tree:get_key(fpath .. "::ParamFixture::Positive"))
++
++    assert.equals(0, #source:children())
++  end)
++
+   it("correctly parses interrupted namespace", function()
+     assert_parses_as(
+       [[
+diff --git a/tests/unit/report_spec.lua b/tests/unit/report_spec.lua
+index 62f6c90..4aa75f5 100644
+--- a/tests/unit/report_spec.lua
++++ b/tests/unit/report_spec.lua
+@@ -264,6 +264,7 @@ describe("report builder", function()
+       results_path = json_path,
+       code = 0,
+       output = MOCK_OUTPUT_FILE,
++      position_ids = nil,
+       expect_error = false,
+     }
+     opts = vim.tbl_extend("force", default_opts, opts or {})
+@@ -273,12 +274,13 @@ describe("report builder", function()
+       context = {
+         results_path = opts.results_path,
+         positions = {},
+-        name2path = {
++        name2path = opts.name2path or {
+           ["TestOne"] = dirpath .. "/test_one.cpp",
+           ["TestOne.Foo"] = dirpath .. "/test_one.cpp",
+           ["TestTwo"] = dirpath .. "/test_two.cpp",
+           ["TestTwo.Bar"] = dirpath .. "/test_two.cpp",
+         },
++        position_ids = opts.position_ids,
+       },
+     }, { code = opts.code, output = opts.output }, tree)
+     local ok, message_or_results = pcall(function()
+@@ -295,6 +297,272 @@ describe("report builder", function()
+     end
+   end
+ 
++  local function parameterized_tree(runtime_names)
++    local source_file = dirpath .. "/test_one.cpp"
++    local source_id = source_file .. "::TestOne::Foo"
++    local parse = require("neotest-gtest.parse")
++    lib.files.write(source_file, "TEST_P(TestOne, Foo) {}")
++
++    tree = parse.parse_positions(source_file, {
++      [source_id] = runtime_names,
++    })
++
++    return source_id
++  end
++
++  local function write_parameterized_results(cases)
++    local suites = {}
++    for _, case in ipairs(cases) do
++      local suite, name = case.full_name:match("^([^%.]+)%.(.+)$")
++      suites[#suites + 1] = {
++        name = suite,
++        testsuite = {
++          make_gtest_report({
++            name = name,
++            classname = suite,
++            failures = case.failures or {},
++            result = case.result or "COMPLETED",
++          }),
++        },
++      }
++    end
++
++    lib.files.write(json_path, vim.json.encode({ testsuites = suites }))
++  end
++
++  it("reports pass, fail, and skip on separate runtime leaves and fails the parent", function()
++    setup()
++    local names = { "First/TestOne.Foo/0", "First/TestOne.Foo/1", "Second/TestOne.Foo/0" }
++    local source_id = parameterized_tree(names)
++    write_parameterized_results({
++      { full_name = names[1] },
++      {
++        full_name = names[2],
++        failures = {
++          { failure = dirpath .. "/test_one.cpp:3\nexpected true, got false", type = "" },
++        },
++      },
++      { full_name = names[3], result = "SKIPPED" },
++    })
++
++    local results = make_neotest_results({
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id },
++    })
++
++    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
++    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
++    assert.equals("skipped", results[source_id .. "::" .. names[3]].status)
++    assert.equals("failed", results[source_id].status)
++    assert.equals(2, results[source_id .. "::" .. names[2]].errors[1].line)
++    assert.matches(
++      "expected true, got false",
++      results[source_id .. "::" .. names[2]].short,
++      1,
++      true
++    )
++    assert.same({}, results[source_id .. "::" .. names[1]].errors)
++  end)
++
++  it("reports typed cases by their full runtime names", function()
++    setup()
++    local source_file = dirpath .. "/test_one.cpp"
++    local source_id = source_file .. "::TypedFixture::Works"
++    local names = { "TypedFixture/Small.Works", "TypedFixture/Large.Works" }
++    local parse = require("neotest-gtest.parse")
++
++    lib.files.write(source_file, "TYPED_TEST(TypedFixture, Works) {}")
++    tree = parse.parse_positions(source_file, { [source_id] = names })
++    write_parameterized_results({
++      { full_name = names[1] },
++      {
++        full_name = names[2],
++        failures = { { failure = source_file .. ":1\ntyped failure", type = "" } },
++      },
++    })
++
++    local results = make_neotest_results({
++      name2path = { ["TypedFixture.Works"] = source_file },
++      position_ids = { source_id },
++    })
++
++    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
++    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
++    assert.equals("failed", results[source_id].status)
++    assert.equals("typed failure", results[source_id .. "::" .. names[2]].errors[1].message)
++    assert.equals(0, results[source_id .. "::" .. names[2]].errors[1].line)
++  end)
++
++  it("reports type-parameterized cases from separate instantiations", function()
++    setup()
++    local source_file = dirpath .. "/test_one.cpp"
++    local source_id = source_file .. "::PatternFixture::Works"
++    local names = {
++      "First/PatternFixture/0.Works",
++      "Second/PatternFixture/0.Works",
++    }
++    local parse = require("neotest-gtest.parse")
++
++    lib.files.write(source_file, "TYPED_TEST_P(PatternFixture, Works) {}")
++    tree = parse.parse_positions(source_file, { [source_id] = names })
++    write_parameterized_results({
++      { full_name = names[1] },
++      {
++        full_name = names[2],
++        failures = { { failure = source_file .. ":1\ntype pattern failed", type = "" } },
++      },
++    })
++
++    local results = make_neotest_results({
++      name2path = { ["PatternFixture.Works"] = source_file },
++      position_ids = { source_id },
++    })
++
++    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
++    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
++    assert.equals("failed", results[source_id].status)
++    assert.equals("type pattern failed", results[source_id .. "::" .. names[2]].errors[1].message)
++    assert.equals(0, results[source_id .. "::" .. names[2]].errors[1].line)
++  end)
++
++  it("fails selected runtime leaves when the JSON report is missing", function()
++    setup()
++    local name = "First/TestOne.Foo/0"
++    local source_id = parameterized_tree({ name })
++
++    local results = make_neotest_results({
++      results_path = dirpath .. "/missing.json",
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id .. "::" .. name },
++    })
++
++    assert.equals("failed", results[source_id .. "::" .. name].status)
++    assert.matches("result", results[source_id .. "::" .. name].errors[1].message)
++  end)
++
++  it("fails unreported runtime leaves when the process crashes after partial JSON", function()
++    setup()
++    local names = { "First/TestOne.Foo/0", "First/TestOne.Foo/1" }
++    local source_id = parameterized_tree(names)
++    write_parameterized_results({ { full_name = names[1] } })
++
++    local results = make_neotest_results({
++      code = 139,
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id },
++    })
++
++    assert.equals("passed", results[source_id .. "::" .. names[1]].status)
++    assert.equals("failed", results[source_id .. "::" .. names[2]].status)
++    assert.equals("failed", results[source_id].status)
++    assert.matches("139", results[source_id .. "::" .. names[2]].errors[1].message)
++  end)
++
++  it("fails a selected leaf when the process crashes after writing a passing report", function()
++    setup()
++    local name = "First/TestOne.Foo/0"
++    local source_id = parameterized_tree({ name })
++    write_parameterized_results({ { full_name = name } })
++
++    local results = make_neotest_results({
++      code = 139,
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id .. "::" .. name },
++    })
++
++    assert.equals("failed", results[source_id .. "::" .. name].status)
++    assert.matches("139", results[source_id .. "::" .. name].errors[1].message)
++  end)
++
++  it("fails a selected source when the process crashes after writing passing reports", function()
++    setup()
++    local name = "First/TestOne.Foo/0"
++    local source_id = parameterized_tree({ name })
++    write_parameterized_results({ { full_name = name } })
++
++    local results = make_neotest_results({
++      code = 139,
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id },
++    })
++
++    assert.equals("failed", results[source_id].status)
++    assert.matches("139", results[source_id].errors[1].message)
++    assert.equals("passed", results[source_id .. "::" .. name].status)
++  end)
++
++  it("diagnoses a returned runtime case that has no position", function()
++    setup()
++    local name = "First/TestOne.Foo/Unexpected"
++    local source_id = parameterized_tree({ "First/TestOne.Foo/0" })
++    write_parameterized_results({ { full_name = name } })
++    local notifications = ui_mock.NotificationsMock:new()
++
++    local results = make_neotest_results({
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id },
++    })
++    notifications:revert()
++
++    assert.is_nil(results[source_id .. "::" .. name])
++    notifications:assert_notified(name, vim.log.levels.WARN)
++    assert.equals("failed", results[source_id].status)
++    assert.matches("Runtime case has no position", results[source_id].errors[1].message)
++  end)
++
++  it("warns when a returned runtime suite has no source mapping", function()
++    setup()
++    local source_id = parameterized_tree({ "First/TestOne.Foo/0" })
++    local unknown_name = "Other/Unexpected.Case/0"
++    write_parameterized_results({ { full_name = unknown_name } })
++    local notifications = ui_mock.NotificationsMock:new()
++
++    local results = make_neotest_results({
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++      position_ids = { source_id },
++    })
++    notifications:revert()
++
++    assert.is_nil(results[source_id])
++    notifications:assert_notified(unknown_name, vim.log.levels.WARN)
++  end)
++
++  it("keeps duplicate runtime names from different executable mappings separate", function()
++    setup()
++    local runtime_name = "Same/TestOne.Foo/0"
++    local first_file = dirpath .. "/test_one.cpp"
++    local second_file = dirpath .. "/test_two.cpp"
++    local first_id = first_file .. "::TestOne::Foo"
++    local second_id = second_file .. "::TestOne::Foo"
++    local parse = require("neotest-gtest.parse")
++    lib.files.write(first_file, "TEST_P(TestOne, Foo) {}")
++    lib.files.write(second_file, "TEST_P(TestOne, Foo) {}")
++
++    tree = parse.parse_positions(first_file, { [first_id] = { runtime_name } })
++    write_parameterized_results({ { full_name = runtime_name } })
++    local first_results = make_neotest_results({
++      name2path = { [runtime_name] = first_file, ["TestOne.Foo"] = first_file },
++      position_ids = { first_id },
++    })
++
++    tree = parse.parse_positions(second_file, { [second_id] = { runtime_name } })
++    write_parameterized_results({
++      {
++        full_name = runtime_name,
++        failures = { { failure = second_file .. ":1\nsecond executable failed", type = "" } },
++      },
++    })
++    local second_results = make_neotest_results({
++      name2path = { [runtime_name] = second_file, ["TestOne.Foo"] = first_file },
++      position_ids = { second_id },
++    })
++
++    assert.equals("passed", first_results[first_id .. "::" .. runtime_name].status)
++    assert.is_nil(first_results[second_id .. "::" .. runtime_name])
++    assert.equals("failed", second_results[second_id .. "::" .. runtime_name].status)
++    assert.is_nil(second_results[first_id .. "::" .. runtime_name])
++  end)
++
+   it("builder happy path creates correct reports", function()
+     setup()
+     local results = make_neotest_results()
+@@ -314,6 +582,57 @@ describe("report builder", function()
+     })
+   end)
+ 
++  it("combines parameterized instances at their source position", function()
++    setup()
++    tree = tree_utils.make_directory_tree({
++      ["test_one.cpp"] = "TEST_P(TestOne, Foo) {}",
++    }, dirpath)
++    full_gtest_report.testsuites = {
++      {
++        name = "First/TestOne",
++        testsuite = {
++          make_gtest_report({
++            name = "Foo/0",
++            classname = "First/TestOne",
++            failures = {},
++          }),
++        },
++      },
++      {
++        name = "Second/TestOne",
++        testsuite = {
++          make_gtest_report({
++            name = "Foo/1",
++            classname = "Second/TestOne",
++            failures = { { failure = FILENAME .. ":1\nBroken", type = "" } },
++          }),
++        },
++      },
++      {
++        name = "TestOne",
++        testsuite = {
++          make_gtest_report({
++            name = "Foo/2",
++            classname = "TestOne",
++            failures = {},
++          }),
++        },
++      },
++    }
++    lib.files.write(json_path, vim.json.encode(full_gtest_report))
++
++    local results = make_neotest_results({
++      name2path = { ["TestOne.Foo"] = dirpath .. "/test_one.cpp" },
++    })
++    local result = results[dirpath .. "/test_one.cpp::TestOne::Foo"]
++    assert.is_not_nil(result)
++    assert.are.equal("failed", result.status)
++    assert.is_not_nil(result.short:find("First/TestOne.Foo/0", 1, true))
++    assert.is_not_nil(result.short:find("Second/TestOne.Foo/1", 1, true))
++    assert.is_not_nil(result.short:find("TestOne.Foo/2", 1, true))
++    assert.are.equal("Broken", result.errors[1].message)
++  end)
++
+   it("builder throws error if file does not exist", function()
+     local message = make_neotest_results({ expect_error = true, results_path = "/doesntexist" })
+     ---@cast message string
+diff --git a/tests/utils/controller.lua b/tests/utils/controller.lua
+index f0e22d6..bf21562 100644
+--- a/tests/utils/controller.lua
++++ b/tests/utils/controller.lua
+@@ -81,10 +81,22 @@ function TestsController:assert_results_published(files)
+   local specs = self:_load_specs(files)
+ 
+   local results, position2output_file = self._results_recorder:get_aggregated_results()
+-  helpers.assert_same_keys(specs, results)
++  local source_results = {}
++  local positions = neotest.state.positions(self.adapter_id)
++
++  for id, result in pairs(results) do
++    local node = positions and positions:get_key(id)
++    local extra = node and node:data().extra
++
++    if not (extra and extra.runtime_name) then
++      source_results[id] = result
++    end
++  end
++
++  helpers.assert_same_keys(specs, source_results)
+   for position, spec in pairs(specs) do
+     spec.output_file = position2output_file[position]
+-    spec:assert_matches_neotest_result(results[position])
++    spec:assert_matches_neotest_result(source_results[position])
+   end
+ end
+ 
+@@ -174,5 +186,6 @@ function M.setup()
+ 
+   -- call any function to trigger ensure_started()
+   client:get_adapters()
++  M.state._client = client
+ end
+ return M
+diff --git a/tests/utils/neotest_spec.lua b/tests/utils/neotest_spec.lua
+index 6b483c2..0c5bf5a 100644
+--- a/tests/utils/neotest_spec.lua
++++ b/tests/utils/neotest_spec.lua
+@@ -40,6 +40,7 @@ end
+ local function filter2testnames(filters)
+   local positions = {}
+   for _, filter in ipairs(filters) do
++    filter = filter:gsub("^%*/", ""):gsub("/%*$", "")
+     local parts = vim.split(filter, ".", { plain = true })
+     local namespace = parts[1]
+     local test_name = parts[2]
+@@ -167,6 +168,9 @@ function AdapterResultSpec:_check_context_matches_command(context, command)
+ 
+   assert.is_not_nil(results_path)
+   assert.is_not_nil(context.name2path)
++  assert.is_not_nil(context.position_ids)
++
++  context.position_ids = nil
+   assert.are.same({ results_path = results_path, name2path = expected_name2path }, context)
+ end
+ 
+@@ -175,9 +179,16 @@ function AdapterResultSpec:_get_name2path(filters)
+   local testnames = filter2testnames(filters)
+   local all_name2path = self:_get_all_name2path()
+   local name2path = {}
++  local selected = {}
++  for _, testname in ipairs(testnames) do
++    selected[testname] = true
++  end
+   for _, testname in ipairs(testnames) do
+     assert.is_not_nil(all_name2path[testname])
+-    name2path[testname] = all_name2path[testname]
++    local namespace = testname:match("^([^%.]+)%.")
++    if namespace == nil or not selected[namespace] then
++      name2path[testname] = all_name2path[testname]
++    end
+   end
+   return name2path
+ end
+diff --git a/tests/utils/report.lua b/tests/utils/report.lua
+index d2def29..eff39a4 100644
+--- a/tests/utils/report.lua
++++ b/tests/utils/report.lua
+@@ -68,7 +68,13 @@ function ReportSpec:_assert_matches_summary(summary)
+   local lineend = string.find(summary, "\n", 1, true)
+   local header = summary:sub(1, lineend - 1)
+   local body = summary:sub(lineend + 1)
+-  self:_assert_matches_header(header)
++  -- Generated source positions can contain several runtime case summaries.
++  local generated_header = header:find("/" .. self.namespace .. "." .. self.name .. "/", 1, true)
++    or (header:find(self.namespace .. "/", 1, true) and header:find("." .. self.name, 1, true))
++
++  if not (self.summary == "MATCH_ERRORS_ONLY" and generated_header) then
++    self:_assert_matches_header(header)
++  end
+   self:_assert_matches_body(body)
+ end
+ 

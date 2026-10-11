@@ -8,10 +8,10 @@ It should work well out-of-the-box for most cases, though some features (see bel
 are not yet supported.
 
 ## Requirements
-* Neovim 0.9.1+, 0.10.x, or nightly.
+* Neovim 0.12+ or nightly.
 * [Google Test][google-test] 1.10+
 * [neotest] (latest, incl. nvim-nio and plenary.nvim)
-* [nvim-treesitter] (latest, with CPP parser installed via `TSInstall cpp`)
+* Tree-sitter CPP parser (e.g., via [nvim-treesitter]'s `TSInstall cpp`)
 * [nvim-dap] (latest, _optional_, required for debugging)
 
 ## Features
@@ -36,10 +36,12 @@ for that declaration. Buffer-based nearest-test selection chooses the source
 parent. Generated cases report their results independently; a failed case also
 marks its parent failed.
 
-The executable's `--gtest_list_tests` output supplies the runtime names. Rebuild
-and save the source file after changing instantiations or types. Until the save
-refresh, source parents remain available and run as grouped tests. Other
-generated Google Test macro families are not yet supported.
+The executable's `--gtest_list_tests` output supplies the runtime names. After
+the first executable configuration, save the source file to show its compiled
+cases. Later executable rebuilds refresh those cases automatically, including
+when the source buffer is closed; `:ConfigureGtest` is only needed again to
+change the executable mapping. Other generated Google Test macro families are
+not yet supported.
 
 To run each compiled case in a separate process, set `process_isolation = true`
 in the adapter setup. This applies to normal runs; DAP runs keep their normal
@@ -48,7 +50,8 @@ executable. Isolated runs start one process per case, which costs more time for
 large selections but prevents process-local state and a crashed case from
 affecting later cases. Each case uses an exact Google Test filter and its own
 JSON report. Generated cases require a configured executable and a refreshed
-runtime inventory; rebuild and save the source file before an isolated run.
+runtime inventory. Rebuilding the executable refreshes that inventory after
+the initial discovery.
 
 You can override the setting for one run with
 `require("neotest").run.run({ process_isolation = true })`.

@@ -70,10 +70,8 @@ local function extract_captures(
 
   local source_lines = vim.split(source, "\n", { plain = true })
   local gettext = function(match, capture_name)
-    local node = match[query.captures[capture_name]]
-    if type(node) == "table" then
-      node = node[1]
-    end
+    local nodes = match[query.captures[capture_name]]
+    local node = nodes and nodes[1]
     if node == nil then
       error(vim.inspect({ node, match, query.captures, capture_name }))
     end
@@ -89,14 +87,11 @@ local function extract_captures(
     return table.concat(parts, "\n")
   end
 
-  for _, match in query:iter_matches(root, source, nil, nil, { all = false }) do
+  for _, match in query:iter_matches(root, source) do
     local namespace_name = gettext(match, "namespace.name")
     local test_kind = gettext(match, "test.kind")
     local test_name = gettext(match, "test.name")
-    local test_definition = match[query.captures["test.definition"]]
-    if type(test_definition) == "table" then
-      test_definition = test_definition[1]
-    end
+    local test_definition = match[query.captures["test.definition"]][1]
     tests[#tests + 1] = {
       name = test_name,
       kind = test_kind,
