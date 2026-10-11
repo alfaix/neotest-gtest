@@ -42,4 +42,6 @@ TEST_P(EmptyFixture, NeverInstantiated) {
   FAIL() << "no instances expected";
 }
 
+#ifdef GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(EmptyFixture);
+#endif
