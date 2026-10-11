@@ -6,6 +6,7 @@ local nio = require("nio")
 local files = require("neotest.lib").files
 local ts_lib = require("neotest.lib").treesitter
 local types = require("neotest.types")
+local test_kinds = require("neotest-gtest.test_kinds")
 
 local Tree = types.Tree
 
@@ -154,16 +155,12 @@ end
 -- Thus, {a, {b, {c}}, {d}, {e, {f}, {g}}} represents a(b(c))(d)(e(f,g))
 -- Generated runtime cases form a fourth level below their source declaration.
 
-local function is_generated_kind(kind)
-  return kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
-end
-
 ---Builds a tree from a list of namespaces and tests extracted from
 ---the file represented by `fileobj`.
 ---@param fileobj neotest.Position The file to build the tree for
 ---@param tests any
 ---@return table
-local function build_tree(fileobj, namespaces, tests, runtime_by_source)
+local function build_tree(fileobj, namespaces, tests)
   local tree = { fileobj }
   local namespace2idx = {}
   for name, range in pairs(namespaces) do
@@ -188,26 +185,12 @@ local function build_tree(fileobj, namespaces, tests, runtime_by_source)
       extra = { kind = test.kind },
     }
     testobj.id = position_id(testobj, { namespace[1] })
-    local source = testobj
-    if is_generated_kind(test.kind) and runtime_by_source and runtime_by_source[testobj.id] then
-      source = { testobj }
-      for _, runtime_name in ipairs(runtime_by_source[testobj.id]) do
-        source[#source + 1] = {
-          id = testobj.id .. "::" .. runtime_name,
-          type = "test",
-          path = fileobj.path,
-          name = runtime_name,
-          range = test.range,
-          extra = { kind = test.kind, runtime_name = runtime_name },
-        }
-      end
-    end
-    namespace[#namespace + 1] = source
+    namespace[#namespace + 1] = testobj
   end
   return tree
 end
 
-local function collect_tests(file_path, source, root, runtime_by_source)
+local function collect_tests(file_path, source, root)
   local path_elems = vim.split(file_path, files.sep, { plain = true })
   local fileobj = {
     id = file_path,
@@ -217,7 +200,7 @@ local function collect_tests(file_path, source, root, runtime_by_source)
     range = { root:range() },
   }
   local namespaces, tests = extract_captures(TREESITTER_GTEST_QUERY, source, root)
-  return build_tree(fileobj, namespaces, tests, runtime_by_source)
+  return build_tree(fileobj, namespaces, tests)
 end
 
 local function get_file_language(file_path)
@@ -225,15 +208,51 @@ local function get_file_language(file_path)
   return vim.treesitter.language.get_lang(ft)
 end
 
-local function parse_positions_from_string(file_path, content, runtime_by_source)
+local function parse_positions_from_string(file_path, content)
   local lang = get_file_language(file_path)
   local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
   local treesitter_tree = ts_lib.fast_parse(lang_tree):root()
-  local tests_tree = collect_tests(file_path, content, treesitter_tree, runtime_by_source)
+  local tests_tree = collect_tests(file_path, content, treesitter_tree)
   local neotest_tree = Tree.from_list(tests_tree, function(pos)
     return pos.id
   end)
   return neotest_tree
+end
+
+---Add compiled cases to an already parsed source tree.
+---@param source_tree neotest.Tree
+---@param runtime_by_source table<string, string[]>
+---@return neotest.Tree
+function M.enrich_positions(source_tree, runtime_by_source)
+  if next(runtime_by_source) == nil then
+    return source_tree
+  end
+
+  local positions = source_tree:to_list()
+  for i = 2, #positions do
+    local namespace = positions[i]
+    for j = 2, #namespace do
+      local source = namespace[j]
+      local test = source[1]
+      local names = runtime_by_source[test.id]
+      if test_kinds.is_generated(test.extra.kind) and names then
+        for _, runtime_name in ipairs(names) do
+          source[#source + 1] = {
+            id = test.id .. "::" .. runtime_name,
+            type = "test",
+            path = test.path,
+            name = runtime_name,
+            range = test.range,
+            extra = { kind = test.extra.kind, runtime_name = runtime_name },
+          }
+        end
+      end
+    end
+  end
+
+  return Tree.from_list(positions, function(pos)
+    return pos.id
+  end)
 end
 
 function M.parse_positions(file_path, runtime_by_source)
@@ -241,7 +260,11 @@ function M.parse_positions(file_path, runtime_by_source)
   nio.sleep(config.parsing_throttle_ms)
   local content = files.read(file_path)
   nio.scheduler()
-  return parse_positions_from_string(file_path, content, runtime_by_source)
+  local source_tree = parse_positions_from_string(file_path, content)
+  if runtime_by_source then
+    return M.enrich_positions(source_tree, runtime_by_source)
+  end
+  return source_tree
 end
 
 return M

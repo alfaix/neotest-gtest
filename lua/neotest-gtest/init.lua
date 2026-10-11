@@ -7,6 +7,7 @@ local inventory = require("neotest-gtest.executables.inventory")
 local refresh = require("neotest-gtest.executables.refresh")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
 local neotest = require("neotest")
+local test_kinds = require("neotest-gtest.test_kinds")
 
 local GTestNeotestAdapter = { name = "neotest-gtest" }
 
@@ -98,10 +99,7 @@ function GTestNeotestAdapter.discover_positions(file_path)
       end
     end
 
-    if
-      data.type == "test"
-      and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
-    then
+    if data.type == "test" and test_kinds.is_generated(kind) then
       local executable = registry:configured_executable_for(data.id)
 
       if executable then
@@ -151,7 +149,7 @@ function GTestNeotestAdapter.discover_positions(file_path)
     return source_tree
   end
 
-  return parse.parse_positions(file_path, runtime_by_source)
+  return parse.enrich_positions(source_tree, runtime_by_source)
 end
 
 GTestNeotestAdapter.is_test_file = function(path)

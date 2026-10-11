@@ -2,6 +2,7 @@ local lib = require("neotest.lib")
 local executables = require("neotest-gtest.executables")
 local utils = require("neotest-gtest.utils")
 local config = require("neotest-gtest.config")
+local test_kinds = require("neotest-gtest.test_kinds")
 
 ---Gets a filter argument for the given test node
 ---@param node neotest.Tree a tree node representing a test
@@ -58,7 +59,7 @@ local function get_filters_for_nodes(nodes)
       local filters = { namespace .. ".*" }
       for _, child in ipairs(node:children()) do
         local kind = child:data().extra.kind
-        if kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P" then
+        if test_kinds.is_generated(kind) then
           filters[#filters + 1] = get_filter_for_test_node(child)
         end
       end
@@ -208,7 +209,7 @@ function NeotestAdapter:_build_isolated_specs(executable2nodes)
     if data.type == "test" then
       local children = node:children()
       local kind = data.extra and data.extra.kind
-      local generated = kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
+      local generated = test_kinds.is_generated(kind)
 
       if generated and #children == 0 and not (data.extra and data.extra.runtime_name) then
         error("Process isolation requires compiled case inventory for " .. data.id)

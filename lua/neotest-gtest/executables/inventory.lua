@@ -1,5 +1,6 @@
 local M = {}
 local nio = require("nio")
+local test_kinds = require("neotest-gtest.test_kinds")
 
 local run = nio.wrap(function(command, options, callback)
   vim.system(command, options, callback)
@@ -76,10 +77,7 @@ function M.map_source(tree, names)
     local data = node:data()
 
     local kind = data.extra and data.extra.kind
-    if
-      data.type == "test"
-      and (kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P")
-    then
+    if data.type == "test" and test_kinds.is_generated(kind) then
       by_source[data.id] = {}
 
       local source_name = node:parent():data().name .. "." .. data.name

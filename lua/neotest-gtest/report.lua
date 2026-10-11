@@ -1,6 +1,7 @@
 local utils = require("neotest-gtest.utils")
 local lib = require("neotest.lib")
 local config = require("neotest-gtest.config")
+local test_kinds = require("neotest-gtest.test_kinds")
 
 ---@class neotest-gtest.Report
 ---@field _node neotest.Tree
@@ -224,7 +225,7 @@ function ReportConverter:make_neotest_results()
         local runtime_id = id .. "::" .. runtime_name
         local runtime_node = self._tree:get_key(runtime_id)
         local kind = node:data().extra and node:data().extra.kind
-        local is_generated = kind == "TEST_P" or kind == "TYPED_TEST" or kind == "TYPED_TEST_P"
+        local is_generated = test_kinds.is_generated(kind)
 
         if runtime_node then
           results[runtime_id] = Report:new(test, runtime_node)
@@ -298,66 +299,63 @@ function ReportConverter:_fail_unreported_positions(results, missing_json)
     end
   end
 
-  for _, id in ipairs(selected) do
-    local node = self._tree:get_key(id)
-    if node then
-      fail_node(node)
+  local function mark_abnormal_exit(node, id)
+    local message = string.format(
+      "Gtest executable exited with code %s after writing results: %s",
+      self._result.code,
+      id
+    )
+    local result = results[id]
+
+    if result then
+      result.status = "failed"
+      result.short = result.short .. "\n\n" .. message
+      result.errors[#result.errors + 1] = { message = message }
+    else
+      results[id] = {
+        status = "failed",
+        output = self._result.output,
+        short = message,
+        errors = { { message = message } },
+      }
     end
-  end
 
-  if not missing_json and self._result.code ~= 0 and self._result.code ~= 1 then
-    for _, id in ipairs(selected) do
-      local node = self._tree:get_key(id)
-      if node then
-        local message = string.format(
-          "Gtest executable exited with code %s after writing results: %s",
-          self._result.code,
-          id
-        )
-        local result = results[id]
-
-        if result then
-          result.status = "failed"
-          result.short = result.short .. "\n\n" .. message
-          result.errors[#result.errors + 1] = { message = message }
-        else
-          results[id] = {
-            status = "failed",
-            output = self._result.output,
-            short = message,
-            errors = { { message = message } },
-          }
-        end
-
-        local parent = node:parent()
-        while parent do
-          if results[parent:data().id] then
-            results[parent:data().id].status = "failed"
-          end
-          parent = parent:parent()
-        end
+    local parent = node:parent()
+    while parent do
+      if results[parent:data().id] then
+        results[parent:data().id].status = "failed"
       end
+      parent = parent:parent()
     end
   end
 
   -- A source position also reports the combined status of its runtime leaves.
-  for _, id in ipairs(selected) do
-    local node = self._tree:get_key(id)
-    if node then
-      for _, descendant in node:iter_nodes() do
-        local data = descendant:data()
-        if data.extra and data.extra.runtime_name then
-          local parent_id = descendant:parent():data().id
-          local parent = results[parent_id]
-          if parent and results[data.id] and results[data.id].status == "failed" then
-            parent.status = "failed"
-            if not parent.short:find(results[data.id].short, 1, true) then
-              parent.short = parent.short .. "\n\n" .. results[data.id].short
-              vim.list_extend(parent.errors, results[data.id].errors)
-            end
+  local function propagate_failed_cases(node)
+    for _, descendant in node:iter_nodes() do
+      local data = descendant:data()
+      if data.extra and data.extra.runtime_name then
+        local parent_id = descendant:parent():data().id
+        local parent = results[parent_id]
+        if parent and results[data.id] and results[data.id].status == "failed" then
+          parent.status = "failed"
+          if not parent.short:find(results[data.id].short, 1, true) then
+            parent.short = parent.short .. "\n\n" .. results[data.id].short
+            vim.list_extend(parent.errors, results[data.id].errors)
           end
         end
       end
+    end
+  end
+
+  local abnormal_exit = not missing_json and self._result.code ~= 0 and self._result.code ~= 1
+  for _, id in ipairs(selected) do
+    local node = self._tree:get_key(id)
+    if node then
+      fail_node(node)
+      if abnormal_exit then
+        mark_abnormal_exit(node, id)
+      end
+      propagate_failed_cases(node)
     end
   end
 end
@@ -372,8 +370,6 @@ function ReportConverter:_find_node_by_name(namespace, name)
     fpath = ctx.name2path[runtime_name]
   elseif ctx.name2path[namespace] then
     fpath = ctx.name2path[namespace]
-  elseif ctx.name2path[namespace .. "." .. name] then
-    fpath = ctx.name2path[namespace .. "." .. name]
   end
 
   if name:find("/", 1, true) then
@@ -395,7 +391,7 @@ function ReportConverter:_find_node_by_name(namespace, name)
   local node = self._tree:get_key(node_id)
   if source_namespace ~= namespace or source_name ~= name then
     local kind = node and node:data().extra and node:data().extra.kind
-    if kind ~= "TEST_P" and kind ~= "TYPED_TEST" and kind ~= "TYPED_TEST_P" then
+    if not test_kinds.is_generated(kind) then
       return nil
     end
   end
@@ -480,13 +476,10 @@ function ReportConverter:_read_gtest_json()
     end)
   end
   if not success then
-    if not utils.fexists(self._spec.command[1]) then
+    if not utils.fexists(self._spec.command[1]) or not self._spec.context.position_ids then
       self:_raise_gtest_failed()
     end
-    if self._spec.context.position_ids then
-      return nil
-    end
-    self:_raise_gtest_failed()
+    return nil
   end
 
   return data
