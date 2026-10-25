@@ -156,7 +156,7 @@ end
 ---@class neotest-gtest.NeotestAdapter
 ---@field _tree neotest.Tree
 ---@field _extra_args string|string[]
----@field _strategy_name string
+---@field _strategy string|neotest.Strategy
 ---@field _output_counter integer
 ---@field _process_isolation boolean
 local NeotestAdapter = {}
@@ -168,7 +168,7 @@ function NeotestAdapter:new(args)
   local adapter = {
     _tree = args.tree,
     _extra_args = args.extra_args,
-    _strategy_name = args.strategy,
+    _strategy = args.strategy,
     _output_counter = 0,
     _process_isolation = args.process_isolation == nil and config.process_isolation
       or args.process_isolation,
@@ -184,7 +184,7 @@ end
 function NeotestAdapter:build_specs()
   local executable2nodes = self:_try_group_nodes_by_executable()
 
-  if self._process_isolation and self._strategy_name ~= "dap" then
+  if self._process_isolation and self._strategy ~= "dap" then
     return self:_build_isolated_specs(executable2nodes)
   end
 
@@ -251,7 +251,7 @@ function NeotestAdapter:_build_isolated_specs(executable2nodes)
     {
       cwd = utils.normalized_root(vim.loop.cwd()),
       command = cases[1].command,
-      context = { isolated_cases = cases },
+      context = { isolated_cases = cases, strategy = self._strategy },
       strategy = require("neotest-gtest.isolation").strategy,
     },
   }
@@ -372,7 +372,7 @@ end
 ---@return table|nil strategy The nvim-dap strategy to be used in the specs
 ---@private
 function NeotestAdapter:_make_strategy_for_command(command)
-  if self._strategy_name ~= "dap" then
+  if self._strategy ~= "dap" then
     return nil
   end
 

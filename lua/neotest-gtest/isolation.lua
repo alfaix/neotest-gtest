@@ -1,13 +1,27 @@
 local lib = require("neotest.lib")
 local nio = require("nio")
+local neotest_config = require("neotest.config")
 
 local M = {}
+
+---Resolves the strategy of the run the same way neotest's process tracker does.
+---@param strategy string|neotest.Strategy
+---@return neotest.Strategy strategy
+---@return table strategy_config User config for a named strategy
+local function resolve_strategy(strategy)
+  if type(strategy) == "function" then
+    return strategy, {}
+  end
+  local strategy_config = neotest_config.strategies[strategy] or {}
+  return require("neotest.client.strategies." .. strategy), strategy_config
+end
 
 -- Neotest accepts a custom strategy returning one Process for a selection.
 -- Its runner fills missing positions after each spec, so the child processes
 -- must finish before the adapter publishes the combined result.
-function M.strategy(spec)
-  local integrated = require("neotest.client.strategies.integrated")
+-- Each child process uses the strategy of the run.
+function M.strategy(spec, context)
+  local strategy, strategy_config = resolve_strategy(spec.context.strategy)
   local cases = spec.context.isolated_cases
   local output_path = nio.fn.tempname()
   local active
@@ -48,9 +62,9 @@ function M.strategy(spec)
 
         case.env = spec.env
         case.cwd = spec.cwd
-        case.strategy = {}
+        case.strategy = vim.tbl_extend("force", case.strategy or {}, strategy_config)
 
-        active = integrated(case)
+        active = strategy(case, context)
         local code = active.result()
         local child_output = active.output()
         case.process_result = { code = code, output = child_output }

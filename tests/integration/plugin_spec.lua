@@ -94,6 +94,27 @@ describe("integration testsuite", function()
     assert.equals("failed", assert(published[file_id]).status)
   end)
 
+  it("runs isolated cases with the strategy of the run", function()
+    setup()
+
+    local file_id = state:mkid("test_isolation.cpp")
+    local integrated = require("neotest.client.strategies.integrated")
+    local commands = {}
+    local function custom_strategy(spec)
+      commands[#commands + 1] = spec.command
+      return integrated(spec)
+    end
+
+    state:configure_executables({ [exe4] = { file_id } })
+    state:run({ args = { file_id, process_isolation = true, strategy = custom_strategy } })
+
+    local results = state._results_recorder:get_aggregated_results()
+
+    assert.equals(5, #commands)
+    assert.equals(exe4, commands[1][1])
+    assert.equals("passed", assert(results[file_id .. "::Isolation::BObserveFreshState"]).status)
+  end)
+
   it("runs parameterized runtime leaves separately through a per-run override", function()
     setup()
 
