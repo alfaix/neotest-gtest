@@ -115,6 +115,75 @@ describe("integration testsuite", function()
     assert.equals("passed", assert(results[file_id .. "::Isolation::BObserveFreshState"]).status)
   end)
 
+  local function run_isolated_spec(file_id, strategy, edit_spec)
+    local adapter = require("neotest-gtest")
+    state:configure_executables({ [exe4] = { file_id } })
+    local tree = neotest.state.positions(state.adapter_id):get_key(file_id)
+    local spec =
+      adapter.build_spec({ tree = tree, strategy = strategy, process_isolation = true })[1]
+    if edit_spec then
+      edit_spec(spec)
+    end
+
+    local process = spec.strategy(spec, {})
+    local code = process.result()
+    return adapter.results(spec, { code = code, output = process.output() }, tree)
+  end
+
+  it("skips isolated cases that did not start before a stop", function()
+    setup()
+
+    local file_id = state:mkid("test_isolation.cpp")
+    local prefix = file_id .. "::Isolation::"
+    local integrated = require("neotest.client.strategies.integrated")
+    local outer
+    local calls = 0
+    local function stop_in_second_case(case)
+      calls = calls + 1
+      if calls == 2 then
+        outer.stop()
+      end
+      return integrated(case)
+    end
+
+    local results = run_isolated_spec(file_id, stop_in_second_case, function(spec)
+      local strategy = spec.strategy
+      spec.strategy = function(...)
+        outer = strategy(...)
+        return outer
+      end
+    end)
+
+    assert.equals(2, calls)
+    assert.equals("passed", assert(results[prefix .. "AWriteState"]).status)
+    assert.equals("passed", assert(results[prefix .. "BObserveFreshState"]).status)
+    assert.equals("skipped", assert(results[prefix .. "CFail"]).status)
+    assert.equals("skipped", assert(results[prefix .. "DCrash"]).status)
+    assert.equals("skipped", assert(results[prefix .. "EAfterCrash"]).status)
+  end)
+
+  it("fails only an isolated case that the executable does not report", function()
+    setup()
+
+    local file_id = state:mkid("test_isolation.cpp")
+    local prefix = file_id .. "::Isolation::"
+
+    local results = run_isolated_spec(file_id, "integrated", function(spec)
+      local stale = spec.context.isolated_cases[2]
+      for i, arg in ipairs(stale.command) do
+        if vim.startswith(arg, "--gtest_filter=") then
+          stale.command[i] = "--gtest_filter=Isolation.NoLongerExists"
+        end
+      end
+    end)
+
+    assert.equals("passed", assert(results[prefix .. "AWriteState"]).status)
+    assert.equals("failed", assert(results[prefix .. "BObserveFreshState"]).status)
+    assert.matches("did not report this case", results[prefix .. "BObserveFreshState"].short)
+    assert.equals("passed", assert(results[prefix .. "CFail"]).status)
+    assert.equals("passed", assert(results[prefix .. "EAfterCrash"]).status)
+  end)
+
   it("runs parameterized runtime leaves separately through a per-run override", function()
     setup()
 

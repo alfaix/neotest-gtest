@@ -49,11 +49,23 @@ function GTestNeotestAdapter.results(spec, result, tree)
     local merged = {}
 
     for _, case in ipairs(spec.context.isolated_cases) do
-      local process_result = case.process_result or { code = result.code, output = result.output }
-      local case_results = Report.converter:new(case, process_result, tree):make_neotest_results()
       local id = case.context.position_ids[1]
+      local process_result = case.process_result
 
-      merged[id] = assert(case_results[id], "Missing isolated result for " .. id)
+      -- The run was stopped before this case started.
+      if process_result == nil then
+        merged[id] = { status = "skipped" }
+      else
+        local converter = Report.converter:new(case, process_result, tree)
+        -- A stale runtime name matches no case, so Google Test exits 0 with an empty report.
+        merged[id] = converter:make_neotest_results()[id]
+          or {
+            status = "failed",
+            output = process_result.output,
+            short = "Gtest executable did not report this case: " .. id,
+            errors = { { message = "Gtest executable did not report this case: " .. id } },
+          }
+      end
     end
 
     return merged
