@@ -1,5 +1,5 @@
 # neotest-gtest
-![CI status](https://github.com/alfaix/neotest-gtest/actions/workflows/workflow.yaml/badge.svg?event=push)
+![CI status](https://github.com/Andeshog/neotest-gtest/actions/workflows/workflow.yaml/badge.svg?event=push)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 This is a [neotest] adapter for [Google Test][google-test], a popular C++ testing
@@ -23,11 +23,38 @@ The plugin provides full support of all neotest features:
 - debugging tests
 - all other niceties of neotest
 
-There are two major features which are not yet supported:
+One major feature is not yet supported:
 
-- `TEST_P` (parameterized tests)
 - Build tool integration for recompilation - you have to do that manually (or with
   some other plugin) for now
+
+`TEST_P`, `TYPED_TEST`, and `TYPED_TEST_P` source declarations remain selectable
+parents. After an executable is configured and the file is saved, the summary
+shows each compiled case beneath its source declaration. Select a leaf to run or
+debug its exact Google Test name, or select the parent to run every compiled case
+for that declaration. Buffer-based nearest-test selection chooses the source
+parent. Generated cases report their results independently; a failed case also
+marks its parent failed.
+
+The executable's `--gtest_list_tests` output supplies the runtime names. After
+the first executable configuration, save the source file to show its compiled
+cases. Later executable rebuilds refresh those cases automatically, including
+when the source buffer is closed; `:ConfigureGtest` is only needed again to
+change the executable mapping. Other generated Google Test macro families are
+not yet supported.
+
+To run each compiled case in a separate process, set `process_isolation = true`
+in the adapter setup. This applies to normal runs; DAP runs keep their normal
+debugging behavior. The default is `false`, so a selection runs grouped by
+executable. Isolated runs start one process per case, which costs more time for
+large selections but prevents process-local state and a crashed case from
+affecting later cases. Each case uses an exact Google Test filter and its own
+JSON report. Generated cases require a configured executable and a refreshed
+runtime inventory. Rebuilding the executable refreshes that inventory after
+the initial discovery.
+
+You can override the setting for one run with
+`require("neotest").run.run({ process_isolation = true })`.
 
 Contributions are welcome! :)
 
@@ -112,6 +139,8 @@ require("neotest-gtest").setup({
   end,
   -- How many old test results to keep on disk (stored in stdpath('data')/neotest-gtest/runs)
   history_size = 3,
+  -- Run one compiled case per process for normal runs (slower on large selections).
+  process_isolation = false,
   -- To prevent large projects from freezing your computer, there's some throttling
   -- for -- parsing test files. Decrease if your parsing is slow and you have a
   -- monster PC.

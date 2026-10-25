@@ -1,13 +1,13 @@
-name: neotest-gtest CI
+name: CI
+
 on:
   push:
-    branches:
-      - main
-  pull_request: ~
+    branches: [main]
+  pull_request:
+
 jobs:
   style:
-    name: style
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: JohnnyMorganz/stylua-action@v4
@@ -46,24 +46,17 @@ jobs:
       TREE_SITTER_CPP_TAG: v0.23.4
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare dependencies
+      - name: Prepare Neovim
         run: |
           mkdir -p _neovim
           curl -fsL "https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}/nvim-linux-x86_64.tar.gz" | tar xzf - --strip-components=1 -C "${PWD}/_neovim"
-          export PLUGINS_PATH=~/.local/share/nvim/site/pack/vendor/start
-          mkdir -p $PLUGINS_PATH
-          git clone --depth 1 https://github.com/nvim-lua/plenary.nvim ${PLUGINS_PATH}/plenary.nvim
-          git clone --depth 1 https://github.com/nvim-neotest/nvim-nio ${PLUGINS_PATH}/nvim-nio
-          git clone --depth 1 https://github.com/mfussenegger/nvim-dap ${PLUGINS_PATH}/nvim-dap
-          git clone --depth 1 https://github.com/nvim-neotest/neotest ${PLUGINS_PATH}/neotest
-          ln -s ${PLUGINS_PATH} ~/.local/share/nvim/lazy
 
       - name: Build cpp tree-sitter parser
         run: |
           git clone --depth 1 --branch ${TREE_SITTER_CPP_TAG} https://github.com/tree-sitter/tree-sitter-cpp _tree-sitter-cpp
-          mkdir -p ~/.local/share/nvim/site/parser
+          mkdir -p .tests/data/nvim/site/parser
           cc -shared -fPIC -O2 -I_tree-sitter-cpp/src _tree-sitter-cpp/src/parser.c _tree-sitter-cpp/src/scanner.c \
-            -o ~/.local/share/nvim/site/parser/cpp.so
+            -o .tests/data/nvim/site/parser/cpp.so
 
       - name: Run tests
         run: |

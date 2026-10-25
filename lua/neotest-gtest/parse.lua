@@ -6,6 +6,7 @@ local nio = require("nio")
 local files = require("neotest.lib").files
 local ts_lib = require("neotest.lib").treesitter
 local types = require("neotest.types")
+local test_kinds = require("neotest-gtest.test_kinds")
 
 local Tree = types.Tree
 
@@ -16,14 +17,14 @@ local Tree = types.Tree
 -- (and with proper compiler flags the CPP code should also compile which should
 --  mean that treesitter should continue to parse these as function definitions)
 -- Thus, we match all function definitions that meet ALL of the following criteria:
--- * Named TEST/TEST_F/TEST_P (#any-of)
+-- * Named TEST/TEST_F/TEST_P/TYPED_TEST/TYPED_TEST_P (#any-of)
 -- * Do not declare a return type (!type)
 -- * Only have two parameters, ignoring comments
 -- * Both parameters are unnamed
 -- * Both parameters' type is a simple type_identifier, i.e., no references
 --   or cv-qualifiers or templates
 -- The first parameter is the test suite, the second one is the test case
--- The name of the "function" is the test kind (TEST/TEST_F/TEST_P)
+-- The name of the "function" is the test kind.
 -- Parameters are checked in Lua: anchors around quantified (comment)* nodes
 -- behave differently across tree-sitter versions.
 local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
@@ -37,7 +38,7 @@ local TREESITTER_GTEST_QUERY = vim.treesitter.query.parse(
       )
       !type
   )
-  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P"))
+  (#any-of? @test.kind "TEST" "TEST_F" "TEST_P" "TYPED_TEST" "TYPED_TEST_P"))
   @test.definition
 ]]
 )
@@ -55,6 +56,7 @@ local function macro_arguments(parameters, source)
       if
         child:type() ~= "parameter_declaration"
         or child:field("declarator")[1] ~= nil
+        or type_node == nil
         or type_node:type() ~= "type_identifier"
       then
         return nil
@@ -87,12 +89,6 @@ local function extract_captures(
   source,
   root
 )
-  -- Namespace definition doesn't really exist as namespace is a made up
-  -- construct in GTest used only to group tests together. We set its range
-  -- from start of first test to end of last test.
-  -- Technically a namespace can be spread across multiple files, or be
-  -- interleaving, this is rare though (I think?) so we're ignoring it.
-
   local namespaces = {}
   local tests = {}
   add_reverse_lookup(query.captures)
@@ -116,7 +112,6 @@ local function extract_captures(
     end
     local test_kind = gettext(match, "test.kind")
     local test_definition = get_node(match, "test.definition")
-
     tests[#tests + 1] = {
       name = test_name,
       kind = test_kind,
@@ -143,7 +138,6 @@ local function extract_captures(
   return namespaces, tests
 end
 
--- TODO support TEST_P and use the index in the name (0/1/2/3)
 ---Create a unique id for a position by concatenating its name with names of its
 ---parents.
 ---@param position neotest.Position The position to return an ID for
@@ -159,9 +153,7 @@ end
 -- level is {parent, children...}
 -- Each child is in turn also a level
 -- Thus, {a, {b, {c}}, {d}, {e, {f}, {g}}} represents a(b(c))(d)(e(f,g))
--- We only have three levels: file, namespace, test
--- We can consider making TEST_P into a nested namespace but that's probably a
--- bad idea. I do not understand the implcations yet.
+-- Generated runtime cases form a fourth level below their source declaration.
 
 ---Builds a tree from a list of namespaces and tests extracted from
 ---the file represented by `fileobj`.
@@ -227,12 +219,52 @@ local function parse_positions_from_string(file_path, content)
   return neotest_tree
 end
 
-function M.parse_positions(file_path)
+---Add compiled cases to an already parsed source tree.
+---@param source_tree neotest.Tree
+---@param runtime_by_source table<string, string[]>
+---@return neotest.Tree
+function M.enrich_positions(source_tree, runtime_by_source)
+  if next(runtime_by_source) == nil then
+    return source_tree
+  end
+
+  local positions = source_tree:to_list()
+  for i = 2, #positions do
+    local namespace = positions[i]
+    for j = 2, #namespace do
+      local source = namespace[j]
+      local test = source[1]
+      local names = runtime_by_source[test.id]
+      if test_kinds.is_generated(test.extra.kind) and names then
+        for _, runtime_name in ipairs(names) do
+          source[#source + 1] = {
+            id = test.id .. "::" .. runtime_name,
+            type = "test",
+            path = test.path,
+            name = runtime_name,
+            range = test.range,
+            extra = { kind = test.extra.kind, runtime_name = runtime_name },
+          }
+        end
+      end
+    end
+  end
+
+  return Tree.from_list(positions, function(pos)
+    return pos.id
+  end)
+end
+
+function M.parse_positions(file_path, runtime_by_source)
   -- throttle: can cause very high CPU load for large projects and freeze
   nio.sleep(config.parsing_throttle_ms)
   local content = files.read(file_path)
   nio.scheduler()
-  return parse_positions_from_string(file_path, content)
+  local source_tree = parse_positions_from_string(file_path, content)
+  if runtime_by_source then
+    return M.enrich_positions(source_tree, runtime_by_source)
+  end
+  return source_tree
 end
 
 return M

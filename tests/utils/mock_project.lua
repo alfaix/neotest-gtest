@@ -116,7 +116,7 @@ function MockProject:assert_configured(node, exec)
   node = self:prepend_root(node)
   ---@cast node string
   local exe2node, missing = self:get_registry():find_executables(node)
-  assert(missing == nil and exe2node ~= nil)
+  assert(#missing == 0)
   assert.is_true(vim.tbl_contains(exe2node[exec], node))
 end
 
@@ -124,7 +124,7 @@ function MockProject:assert_not_configured(node)
   node = self:prepend_root(node)
   ---@cast node string
   local exe2node, missing = self:get_registry():find_executables(node)
-  assert.is_nil(exe2node)
+  assert(next(exe2node) == nil)
   assert(missing)
   ---@cast node string
   assert.is_true(vim.startswith(missing[1], node))

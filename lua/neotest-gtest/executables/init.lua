@@ -2,6 +2,7 @@ local nio = require("nio")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
 local ui = require("neotest-gtest.executables.ui")
 local config = require("neotest-gtest.config")
+local ctest = require("neotest-gtest.executables.ctest")
 
 local M = {}
 
@@ -25,6 +26,7 @@ function M.set_summary_autocmd()
     callback = function(ctx)
       local buf = ctx.buf
       nio.api.nvim_buf_create_user_command(buf, "ConfigureGtest", M.configure_executable, {})
+      nio.api.nvim_buf_create_user_command(buf, "ConfigureGtestAll", ctest.configure_all, {})
       if config.mappings.configure ~= nil then
         vim.api.nvim_buf_set_keymap(buf, "n", config.mappings.configure, "", {
           desc = "Select a Google Test executable for marked tests",

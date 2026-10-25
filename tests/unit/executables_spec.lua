@@ -25,7 +25,7 @@ end
 local function assert_executables_for_node(node_id, expected_executables)
   local executables, missing = registry:find_executables(node_id)
   assert.is_not_nil(executables)
-  assert.is_nil(missing)
+  assert.are.same({}, missing)
   for _, nodes in pairs(expected_executables) do
     table.sort(nodes)
   end
@@ -62,7 +62,7 @@ describe("executables with single test in file", function()
   it("uninitialized find_executables returns error", function()
     setup()
     local exe2nodes, missing = registry:find_executables(root_id)
-    assert.is_nil(exe2nodes)
+    assert.are.same({}, exe2nodes)
     assert.are.equal(#missing, 1)
   end)
 
@@ -86,6 +86,13 @@ describe("executables with single test in file", function()
     setup()
     registry:update_executable(file_id, "/bin/exe1")
     assert_executables_for_node(test_id, { ["/bin/exe1"] = { test_id } })
+  end)
+
+  it("resolves a configured source without requiring a Neotest tree refresh", function()
+    setup()
+    registry:update_executable(file_id, "/bin/exe1")
+    registry._tree = nil
+    assert.equals("/bin/exe1", registry:configured_executable_for(test_id))
   end)
 
   it("executables mapping is persisted via the storage", function()
@@ -187,7 +194,7 @@ describe("with three files in the tree", function()
     registry:update_executable(ids.test_three, "/bin/exe1")
     registry:update_executable(ids.root, nil)
     local _, missing = registry:find_executables(ids.test_one)
-    assert.are.equal(#missing, 1)
+    assert.are.equal(#missing, 2)
   end)
 end)
 

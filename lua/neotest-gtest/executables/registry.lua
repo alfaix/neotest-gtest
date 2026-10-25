@@ -61,13 +61,21 @@ function ExecutablesRegistry:list_executables()
   return vim.tbl_keys(executables_set)
 end
 
+---Look up a configured node or ancestor while discovery is rebuilding the tree.
+---@param id string
+---@return string|nil
+function ExecutablesRegistry:configured_executable_for(id)
+  self:_ensure_node_within_root(id)
+  return self._node2executable[id] or self:_lookup_ancestor_executable(id)
+end
+
 ---@param id string
 function ExecutablesRegistry:find_executables(id)
   self:_reload_tree()
   self:_ensure_node_within_root(id)
   local exe = self._node2executable[id] or self:_lookup_ancestor_executable(id)
   if exe ~= nil then
-    return { [exe] = { id } }, nil
+    return { [exe] = { id } }, {}
   end
 
   return self:_group_children_by_executable(id)
@@ -92,27 +100,25 @@ function ExecutablesRegistry:_lookup_ancestor_executable(id)
 end
 
 function ExecutablesRegistry:_group_children_by_executable(id)
-  local children_exe2nodes = {}
+  local children_exe2nodes, missing = {}, {}
 
   for child_id in self:_iter_children(id) do
-    local child_exe2nodes, missing = self:_group_tree_by_executable(child_id)
-    if child_exe2nodes == nil then
-      return nil, missing
-    end
+    local child_exe2nodes, child_missing = self:_group_tree_by_executable(child_id)
     children_exe2nodes[#children_exe2nodes + 1] = child_exe2nodes
+    vim.list_extend(missing, child_missing)
   end
 
   if #children_exe2nodes == 0 then
     -- No children then this is a leaf for which there is no executable
-    return nil, { id }
+    return {}, { id }
   end
 
-  return _merge_node_by_executable_groups(children_exe2nodes)
+  return _merge_node_by_executable_groups(children_exe2nodes), missing
 end
 
 function ExecutablesRegistry:_group_tree_by_executable(id)
   if self._node2executable[id] ~= nil then
-    return { [self._node2executable[id]] = { id } }, nil
+    return { [self._node2executable[id]] = { id } }, {}
   else
     return self:_group_children_by_executable(id)
   end

@@ -268,4 +268,6 @@ function M.mock_ui()
   return MockUi:new()
 end
 
+M.NotificationsMock = NotificationsMock
+
 return M

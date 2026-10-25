@@ -68,7 +68,13 @@ function ReportSpec:_assert_matches_summary(summary)
   local lineend = string.find(summary, "\n", 1, true)
   local header = summary:sub(1, lineend - 1)
   local body = summary:sub(lineend + 1)
-  self:_assert_matches_header(header)
+  -- Generated source positions can contain several runtime case summaries.
+  local generated_header = header:find("/" .. self.namespace .. "." .. self.name .. "/", 1, true)
+    or (header:find(self.namespace .. "/", 1, true) and header:find("." .. self.name, 1, true))
+
+  if not (self.summary == "MATCH_ERRORS_ONLY" and generated_header) then
+    self:_assert_matches_header(header)
+  end
   self:_assert_matches_body(body)
 end
 

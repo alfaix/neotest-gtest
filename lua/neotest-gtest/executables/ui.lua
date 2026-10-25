@@ -2,8 +2,41 @@ local neotest = require("neotest")
 local nio = require("nio")
 
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
+local refresh = require("neotest-gtest.executables.refresh")
 local utils = require("neotest-gtest.utils")
 local M = {}
+
+local function affected_sources(root2positions)
+  local sources = {}
+
+  for root, positions in pairs(root2positions) do
+    local tree = neotest.state.positions("neotest-gtest:" .. root)
+
+    for _, position in ipairs(positions) do
+      local node = tree and tree:get_key(position)
+
+      if node then
+        for _, descendant in node:iter_nodes() do
+          local data = descendant:data()
+
+          if data.type == "file" then
+            sources[data.path] = true
+          end
+        end
+
+        while node and node:data().type ~= "file" do
+          node = node:parent()
+        end
+
+        if node then
+          sources[node:data().path] = true
+        end
+      end
+    end
+  end
+
+  return sources
+end
 
 function M._configure_executable_async()
   local root2positions = M._get_marked_root2positions()
@@ -16,6 +49,8 @@ function M._configure_executable_async()
   local executable = M._select_or_create_executable(executables, common_executable)
 
   if executable ~= nil then
+    local sources = affected_sources(root2positions)
+
     for root, positions in pairs(root2positions) do
       local registry = GlobalRegistry:for_dir(root)
       for _, position in ipairs(positions) do
@@ -23,6 +58,11 @@ function M._configure_executable_async()
       end
     end
     neotest.summary.clear_marked()
+    nio.scheduler()
+
+    for source in pairs(sources) do
+      refresh.track(executable, source)
+    end
   end
 end
 
@@ -77,7 +117,7 @@ function M._common_executable_for_positions(root2positions)
     local registry = GlobalRegistry:for_dir(root)
     for _, position in ipairs(positions) do
       local exe2nodes, missing = registry:find_executables(position)
-      if missing or not has_single_key(exe2nodes) then
+      if #missing > 0 or not has_single_key(exe2nodes) then
         return nil
       end
       assert(exe2nodes, "must not be nil if missing is not nil")

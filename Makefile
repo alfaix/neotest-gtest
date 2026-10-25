@@ -1,15 +1,17 @@
 .PHONY: test unit-test integration-test submodules
 
-MINIMAL_INIT = tests/unit/minimal_init.lua
-PLENARY_OPTS = {minimal_init='${MINIMAL_INIT}', sequential=true, timeout=5000}
-GTEST_TAG ?= main
-export GTEST_TAG
-export GTEST_PATH
+MINIMAL_INIT = tests/minimal_init.lua
+PLENARY_OPTS = {minimal_init='$(MINIMAL_INIT)', sequential=true, timeout=30000}
+TESTS_HOME = $(CURDIR)/.tests
+export XDG_CONFIG_HOME = $(TESTS_HOME)/config
+export XDG_DATA_HOME = $(TESTS_HOME)/data
+export XDG_STATE_HOME = $(TESTS_HOME)/state
+export XDG_CACHE_HOME = $(TESTS_HOME)/cache
 
 test: unit-test integration-test ;
 
 unit-test:
-	nvim --headless -u ${MINIMAL_INIT} -c "PlenaryBustedDirectory tests/unit ${PLENARY_OPTS}"
+	nvim --headless -u $(MINIMAL_INIT) -c "PlenaryBustedDirectory tests/unit $(PLENARY_OPTS)"
 
 integration-test-all:
 	@for gtest_tag in release-1.10.0 release-1.11.0 release-1.12.1 v1.13.0 v1.14.0 main; do \
@@ -18,7 +20,7 @@ integration-test-all:
 	done
 
 integration-test: build-tests
-	nvim --headless -u ${MINIMAL_INIT} -c "PlenaryBustedDirectory tests/integration ${PLENARY_OPTS}"
+	nvim --headless -u $(MINIMAL_INIT) -c "PlenaryBustedDirectory tests/integration $(PLENARY_OPTS)"
 
 build-tests: tests/integration/cpp
 	$(MAKE) -C tests/integration/cpp build
