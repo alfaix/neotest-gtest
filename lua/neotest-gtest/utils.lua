@@ -233,6 +233,18 @@ function M.normalized_root(path)
   end
 end
 
+---Returns `path` as an absolute path. Relative paths are resolved against `base`.
+---@param path string
+---@param base string Absolute directory to resolve relative paths against
+---@return string
+function M.absolute_path(path, base)
+  if vim.startswith(path, "/") or path:match("^%a:[/\\]") then
+    return vim.fs.normalize(path)
+  end
+
+  return vim.fs.normalize(vim.fs.joinpath(base, path))
+end
+
 function M.schedule_notify(msg, level, opts)
   nio.scheduler()
   vim.notify(msg, level, opts)

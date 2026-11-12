@@ -201,6 +201,7 @@ end
 function NeotestAdapter:_build_isolated_specs(executable2nodes)
   local cases = {}
   local seen = {}
+  local unavailable = {}
   local results_dir
 
   local function add_cases(executable, node)
@@ -211,8 +212,10 @@ function NeotestAdapter:_build_isolated_specs(executable2nodes)
       local kind = data.extra and data.extra.kind
       local generated = test_kinds.is_generated(kind)
 
+      -- Without compiled children, the cases to isolate are unknown. Skip the source and report it.
       if generated and #children == 0 and not (data.extra and data.extra.runtime_name) then
-        error("Process isolation requires compiled case inventory for " .. data.id)
+        unavailable[#unavailable + 1] = data.id
+        return
       end
 
       if #children == 0 then
@@ -237,6 +240,19 @@ function NeotestAdapter:_build_isolated_specs(executable2nodes)
     for _, node in ipairs(nodes) do
       add_cases(executable, node)
     end
+  end
+
+  if #unavailable > 0 then
+    table.sort(unavailable)
+    utils.schedule_notify(
+      string.format(
+        "Process isolation skipped %d source(s) without compiled cases: %s. "
+          .. "Rebuild the executable or configure it with :ConfigureGtest.",
+        #unavailable,
+        table.concat(unavailable, ", ")
+      ),
+      vim.log.levels.WARN
+    )
   end
 
   if #cases == 0 then

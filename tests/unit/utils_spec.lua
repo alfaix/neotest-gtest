@@ -131,3 +131,13 @@ describe("helper functions", function()
     assert.are.equal("/usr", utils.normalized_root("anything"))
   end)
 end)
+
+describe("absolute_path", function()
+  it("keeps an absolute path unchanged", function()
+    assert.equals("/opt/build/tests", utils.absolute_path("/opt/build/tests", "/home/project"))
+  end)
+
+  it("resolves a relative path against the base directory", function()
+    assert.equals("/home/project/build/tests", utils.absolute_path("build/tests", "/home/project"))
+  end)
+end)

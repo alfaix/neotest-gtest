@@ -3,6 +3,7 @@ local it = require("nio.tests").it
 
 local ExecutablesRegistry = require("neotest-gtest.executables.registry")
 local GlobalRegistry = require("neotest-gtest.executables.global_registry")
+local Storage = require("neotest-gtest.storage")
 local tree_utils = require("tests.utils.tree")
 local utils = require("neotest-gtest.utils")
 
@@ -228,5 +229,16 @@ describe("test global registry", function()
     table.sort(exes)
 
     assert.are.same({ "/bin/exe1", "/bin/exe2" }, exes)
+  end)
+
+  it("resolves relative executable paths stored for a project against its root", function()
+    local root = assert(vim.fn.tempname())
+    local node = root .. "/tests/io/stb_image_writer_test.cpp"
+
+    Storage:for_directory(root):node2executable()[node] = "build/MayaFluxTests"
+
+    local reloaded = ExecutablesRegistry:new(root)
+
+    assert.are.same({ root .. "/build/MayaFluxTests" }, reloaded:list_executables())
   end)
 end)

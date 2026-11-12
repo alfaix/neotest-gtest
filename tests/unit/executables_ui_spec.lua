@@ -113,6 +113,16 @@ describe("test executables_ui with single root dir", function()
     ui.marks:assert_marks_not_cleared()
   end)
 
+  it("stores a relative path entered by the user as absolute", function()
+    setup()
+    with_marked_items({ "test_one.cpp::TestOne" })
+    ui.input:return_value("build/exe")
+
+    configure_executable()
+
+    project:assert_configured("test_one.cpp::TestOne", vim.uv.cwd() .. "/build/exe")
+  end)
+
   it("Reconfiguring nodes with the same executable fills default on input", function()
     setup()
     project:set_executables({ ["test_one.cpp"] = "/path/to/exe1" })
