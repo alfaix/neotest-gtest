@@ -66,6 +66,9 @@ function M._configure_executable_async()
     for source in pairs(sources) do
       refresh.track(executable, source)
     end
+
+    -- Neotest only rediscovers on save, so do it now for the affected files.
+    refresh.rediscover(sources)
   end
 end
 

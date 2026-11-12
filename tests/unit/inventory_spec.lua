@@ -122,6 +122,16 @@ Custom/NamedFixture.
     assert.same({ "Other/PatternFixture/0.Unknown" }, unmatched)
   end)
 
+  it("reports a missing executable in one line, without a process error", function()
+    nio.scheduler()
+
+    local missing = assert(vim.fn.tempname())
+    local ok, err = pcall(inventory.list, missing)
+
+    assert.is_false(ok)
+    assert.equals(missing .. " does not exist or cannot be read", err)
+  end)
+
   describe("listing cache", function()
     -- Writes a fake executable that appends one line to a counter file per run.
     local function write_counting_executable(executable, counter, listing, exit_code)

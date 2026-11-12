@@ -138,17 +138,15 @@ local function _raise_nodes_missing_executables(node_names)
       "Some nodes do not have a corresponding GTest executable set. Please "
         .. "configure them by marking them and then running :ConfigureGtest "
         .. "in the summary window. Nodes: %s",
-      table.concat(node_names, ", ")
+      utils.summarize_list(node_names)
     )
   )
 end
 
 local function _warn_nodes_missing_executables(node_names)
-  if throttled("warn") then
-    return
-  end
-  utils.schedule_notify(
-    string.format("Nodes missing executable: %s", table.concat(node_names, ", ")),
+  utils.notify_once(
+    "missing-nodes",
+    string.format("Nodes missing executable: %s", utils.summarize_list(node_names)),
     vim.log.levels.WARN
   )
 end
@@ -244,15 +242,18 @@ function NeotestAdapter:_build_isolated_specs(executable2nodes)
 
   if #unavailable > 0 then
     table.sort(unavailable)
-    utils.schedule_notify(
+    utils.notify_once(
+      "isolation-skipped",
       string.format(
         "Process isolation skipped %d source(s) without compiled cases: %s. "
           .. "Rebuild the executable or configure it with :ConfigureGtest.",
         #unavailable,
-        table.concat(unavailable, ", ")
+        utils.summarize_list(unavailable, 2)
       ),
       vim.log.levels.WARN
     )
+  else
+    utils.notify_clear("isolation-skipped")
   end
 
   if #cases == 0 then
@@ -282,6 +283,8 @@ function NeotestAdapter:_try_group_nodes_by_executable()
       _raise_nodes_missing_executables(missing)
     end
     _warn_nodes_missing_executables(missing)
+  else
+    utils.notify_clear("missing-nodes")
   end
 
   return vim.tbl_map(function(node_ids)

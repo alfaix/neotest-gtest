@@ -564,13 +564,35 @@ describe("integration testsuite", function()
     setup()
     local id = state:mkid("test_two.cpp")
     state:configure_executables({ ["/path/that/does/not/exist"] = { id } })
+
+    -- Configuring lists the binary at once, so the bad path is reported before any run.
+    local reported = false
+    for _ = 1, 100 do
+      reported = pcall(
+        state.ui.notifications.assert_notified,
+        state.ui.notifications,
+        "Google Test inventory unavailable for /path/that/does/not/exist",
+        vim.log.levels.WARN
+      )
+      if reported then
+        break
+      end
+
+      nio.sleep(20)
+    end
+    assert.is_true(reported)
+
     state:run({ args = { id } })
     state:assert_results_failed("/path/that/does/not/exist not found")
     state.ui.notifications:assert_notified(
       "/path/that/does/not/exist not found",
       vim.log.levels.WARN
     )
-    state.ui.notifications:assert_no_other_notifications()
+    -- Rediscovery repeats the inventory warning on each attempt, so allow any number of copies.
+    state.ui.notifications:assert_only_notified({
+      "Google Test inventory unavailable for /path/that/does/not/exist",
+      "/path/that/does/not/exist not found",
+    })
   end)
 
   it("configure wrong executable (namespace)", function()

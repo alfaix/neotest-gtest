@@ -135,19 +135,25 @@ function GTestNeotestAdapter.discover_positions(file_path)
       and source_stat.mtime.sec > executable_stat.mtime.sec
 
     if stale then
-      utils.schedule_notify(
+      utils.notify_once(
+        "stale:" .. executable,
         "Google Test inventory is stale; rebuild " .. executable,
         vim.log.levels.WARN
       )
     else
+      utils.notify_clear("stale:" .. executable)
       local ok, names = pcall(inventory.list, executable)
 
       if not ok then
-        utils.schedule_notify(
-          "Google Test inventory unavailable for " .. executable .. ": " .. tostring(names),
+        -- Only the first line: the rest of a process error is a stack trace.
+        local reason = tostring(names):match("^[^\r\n]*")
+        utils.notify_once(
+          "unavailable:" .. executable,
+          "Google Test inventory unavailable for " .. executable .. ": " .. reason,
           vim.log.levels.WARN
         )
       else
+        utils.notify_clear("unavailable:" .. executable)
         local mapped = inventory.map_source(source_tree, names)
 
         for source_id in pairs(source_ids) do

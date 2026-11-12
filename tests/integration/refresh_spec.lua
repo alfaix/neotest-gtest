@@ -111,10 +111,46 @@ describe("compiled inventory refresh", function()
       nio.sleep(20)
     end
 
+    nio.scheduler()
     vim.fn.delete(source)
 
     assert.is_not_nil(refreshed)
     assert.equals(0, vim.fn.bufloaded(source))
+  end)
+
+  it("adds runtime leaves when an executable is configured, without saving", function()
+    controller.setup()
+    nio.scheduler()
+
+    local state = controller.state
+    local source = state:mkid("test_two.cpp")
+    local source_id = source .. "::ParamFixture::Positive"
+    local runtime_name = "First/ParamFixture.Positive/0"
+    local executable = assert(vim.fn.tempname())
+    local old_list = inventory.list
+
+    lib.files.write(executable, "built")
+    inventory.list = function(path)
+      assert.equals(executable, path)
+      return { runtime_name }
+    end
+
+    state:configure_executables({ [executable] = { source } })
+
+    local leaf
+    for _ = 1, 100 do
+      local positions = neotest.state.positions(state.adapter_id)
+      leaf = positions and positions:get_key(source_id .. "::" .. runtime_name)
+      if leaf then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    inventory.list = old_list
+
+    assert.is_not_nil(leaf)
   end)
 
   it("lists a rebuilt executable once when several open files share it", function()

@@ -60,9 +60,10 @@ function M.list(executable, opts)
   local timeout_ms = (opts and opts.timeout_ms) or DEFAULT_TIMEOUT_MS
   local signature = M.signature(executable)
 
-  -- Without a signature the cache cannot be trusted, so let the process report why.
+  -- Without a signature there is nothing to run or cache. Failing here avoids a process
+  -- error whose text is mostly stack trace.
   if signature == nil then
-    return run_list(executable, timeout_ms)
+    error(string.format("%s does not exist or cannot be read", executable), 0)
   end
 
   local cached = cache[executable]

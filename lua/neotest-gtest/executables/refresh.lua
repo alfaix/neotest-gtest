@@ -87,6 +87,13 @@ function M.track(executable, source)
   entry.sources[source] = true
 end
 
+---Rediscovers the given source files now, without waiting for a save or rebuild.
+---Used after configuring an executable, so its compiled cases appear at once.
+---@param sources table<string, boolean> Set of source file paths
+function M.rediscover(sources)
+  rediscover_sources(sources)
+end
+
 -- Used by the test registry reset so watchers do not cross test cases.
 function M.reset()
   for _, directory in pairs(directories) do
