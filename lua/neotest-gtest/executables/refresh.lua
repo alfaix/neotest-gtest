@@ -1,3 +1,5 @@
+local inventory = require("neotest-gtest.executables.inventory")
+
 local M = {}
 
 local directories = {}
@@ -28,6 +30,10 @@ local function queue_refresh(directory, name)
 
   entry.generation = entry.generation + 1
   local generation = entry.generation
+
+  -- The binary changed, so its cached listing is stale. Rediscovery waits for
+  -- the debounce below, so a link in progress does not start listings.
+  inventory.invalidate(entry.executable)
 
   vim.defer_fn(function()
     if not directory.closed and entry.generation == generation then
@@ -75,7 +81,10 @@ function M.track(executable, source)
   end
 
   directory.executables[name] = directory.executables[name] or { sources = {}, generation = 0 }
-  directory.executables[name].sources[source] = true
+
+  local entry = directory.executables[name]
+  entry.executable = executable
+  entry.sources[source] = true
 end
 
 -- Used by the test registry reset so watchers do not cross test cases.

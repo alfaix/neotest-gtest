@@ -121,4 +121,116 @@ Custom/NamedFixture.
     }, by_source)
     assert.same({ "Other/PatternFixture/0.Unknown" }, unmatched)
   end)
+
+  describe("listing cache", function()
+    -- Writes a fake executable that appends one line to a counter file per run.
+    local function write_counting_executable(executable, counter, listing, exit_code)
+      local script = string.format(
+        "#!/bin/sh\necho run >> '%s'\nprintf '%%s' '%s'\nexit %d\n",
+        counter,
+        listing,
+        exit_code or 0
+      )
+
+      require("neotest.lib").files.write(executable, script)
+      assert.is_true(vim.uv.fs_chmod(executable, 493))
+    end
+
+    local function runs(counter)
+      local count = 0
+      local file = io.open(counter, "r")
+
+      if file == nil then
+        return 0
+      end
+
+      for _ in file:lines() do
+        count = count + 1
+      end
+
+      file:close()
+      return count
+    end
+
+    it("reuses a listing until the executable changes", function()
+      nio.scheduler()
+
+      local executable = assert(vim.fn.tempname())
+      local counter = executable .. ".count"
+
+      write_counting_executable(executable, counter, "Suite.\n  Case\n")
+      assert.same({ "Suite.Case" }, inventory.list(executable))
+      assert.same({ "Suite.Case" }, inventory.list(executable))
+      assert.equals(1, runs(counter))
+
+      write_counting_executable(executable, counter, "Suite.\n  Rebuilt\n  Another\n")
+      assert.same({ "Suite.Rebuilt", "Suite.Another" }, inventory.list(executable))
+      assert.equals(2, runs(counter))
+    end)
+
+    it("shares one process between concurrent listings of the same executable", function()
+      nio.scheduler()
+
+      local executable = assert(vim.fn.tempname())
+      local counter = executable .. ".count"
+
+      -- The sleep keeps the first run in flight while the other callers arrive.
+      require("neotest.lib").files.write(
+        executable,
+        string.format(
+          "#!/bin/sh\necho run >> '%s'\nsleep 0.2\nprintf 'Suite.\\n  Case\\n'\n",
+          counter
+        )
+      )
+      assert.is_true(vim.uv.fs_chmod(executable, 493))
+
+      local results = nio.gather({
+        function()
+          return inventory.list(executable)
+        end,
+        function()
+          return inventory.list(executable)
+        end,
+        function()
+          return inventory.list(executable)
+        end,
+      })
+
+      for _, names in ipairs(results) do
+        assert.same({ "Suite.Case" }, names)
+      end
+      assert.equals(1, runs(counter))
+    end)
+
+    it("does not cache a failed listing", function()
+      nio.scheduler()
+
+      local executable = assert(vim.fn.tempname())
+      local counter = executable .. ".count"
+
+      write_counting_executable(executable, counter, "", 3)
+      local ok, err = pcall(inventory.list, executable)
+
+      assert.is_false(ok)
+      assert.matches("exited with code 3", tostring(err), 1, true)
+
+      write_counting_executable(executable, counter, "Suite.\n  Recovered\n")
+      assert.same({ "Suite.Recovered" }, inventory.list(executable))
+      assert.equals(2, runs(counter))
+    end)
+
+    it("drops the cached listing when invalidated", function()
+      nio.scheduler()
+
+      local executable = assert(vim.fn.tempname())
+      local counter = executable .. ".count"
+
+      write_counting_executable(executable, counter, "Suite.\n  Case\n")
+      inventory.list(executable)
+      inventory.invalidate(executable)
+      inventory.list(executable)
+
+      assert.equals(2, runs(counter))
+    end)
+  end)
 end)

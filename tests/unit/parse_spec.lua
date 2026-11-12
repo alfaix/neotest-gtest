@@ -328,4 +328,50 @@ TYPED_TEST(TypedFixture, Works) {
       }
     )
   end)
+
+  describe("parse cache", function()
+    local function ids(tree)
+      local result = {}
+
+      for _, node in tree:iter_nodes() do
+        result[#result + 1] = node:data().id
+      end
+
+      return result
+    end
+
+    it("returns the same positions for an unchanged file", function()
+      local fpath = assert(vim.fn.tempname()) .. ".cpp"
+      lib.files.write(fpath, "TEST(Cached, First) {}\nTEST(Cached, Second) {}\n")
+
+      local first = ids(parse_module.parse_positions(fpath))
+      local second = ids(parse_module.parse_positions(fpath))
+
+      assert.same(first, second)
+      assert.is_true(vim.tbl_contains(second, fpath .. "::Cached::Second"))
+    end)
+
+    it("reparses a file whose content changed", function()
+      local fpath = assert(vim.fn.tempname()) .. ".cpp"
+      lib.files.write(fpath, "TEST(Cached, First) {}\n")
+      parse_module.parse_positions(fpath)
+
+      lib.files.write(fpath, "TEST(Cached, First) {}\nTEST(Cached, Added) {}\n")
+      local ids_after_edit = ids(parse_module.parse_positions(fpath))
+
+      assert.is_true(vim.tbl_contains(ids_after_edit, fpath .. "::Cached::Added"))
+    end)
+
+    it("does not let a caller change what later parses return", function()
+      local fpath = assert(vim.fn.tempname()) .. ".cpp"
+      lib.files.write(fpath, "TEST(Cached, First) {}\n")
+
+      local mutated = parse_module.parse_positions(fpath)
+      mutated:get_key(fpath .. "::Cached::First"):data().name = "Changed"
+
+      local later = parse_module.parse_positions(fpath)
+
+      assert.equals("First", later:get_key(fpath .. "::Cached::First"):data().name)
+    end)
+  end)
 end)
