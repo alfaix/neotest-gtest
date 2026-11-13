@@ -190,3 +190,20 @@ describe("summarize_list", function()
     assert.equals("a, b, c and 2 more", utils.summarize_list({ "a", "b", "c", "d", "e" }))
   end)
 end)
+
+describe("new_results_dir", function()
+  it("removes old results folders that still contain files", function()
+    nio.scheduler()
+
+    local first = utils.new_results_dir({ history_size = 1 })
+    lib.files.write(first .. "/test_result_0.json", "{}")
+
+    local second = utils.new_results_dir({ history_size = 1 })
+
+    assert.is_nil(vim.uv.fs_stat(first))
+    assert.is_not_nil(vim.uv.fs_stat(second))
+
+    nio.scheduler()
+    vim.fn.delete(second, "rf")
+  end)
+end)

@@ -175,7 +175,7 @@ function M.new_results_dir(opts)
     local path = existing_paths[i]
     -- making sure we don't remove something important
     assert(path:match("%/googletest%-of.*%/neotest%-gtest%-run%-%d+$"))
-    Path:new(path):rm({ recusrive = true })
+    Path:new(path):rm({ recursive = true })
   end
 
   local new_nr
