@@ -111,9 +111,115 @@ describe("compiled inventory refresh", function()
       nio.sleep(20)
     end
 
+    nio.scheduler()
     vim.fn.delete(source)
 
     assert.is_not_nil(refreshed)
     assert.equals(0, vim.fn.bufloaded(source))
+  end)
+
+  it("adds runtime leaves when an executable is configured, without saving", function()
+    controller.setup()
+    nio.scheduler()
+
+    local state = controller.state
+    local source = state:mkid("test_two.cpp")
+    local source_id = source .. "::ParamFixture::Positive"
+    local runtime_name = "First/ParamFixture.Positive/0"
+    local executable = assert(vim.fn.tempname())
+    local old_list = inventory.list
+
+    lib.files.write(executable, "built")
+    inventory.list = function(path)
+      assert.equals(executable, path)
+      return { runtime_name }
+    end
+
+    state:configure_executables({ [executable] = { source } })
+
+    local leaf
+    for _ = 1, 100 do
+      local positions = neotest.state.positions(state.adapter_id)
+      leaf = positions and positions:get_key(source_id .. "::" .. runtime_name)
+      if leaf then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    inventory.list = old_list
+
+    assert.is_not_nil(leaf)
+  end)
+
+  it("lists a rebuilt executable once when several open files share it", function()
+    controller.setup()
+    nio.scheduler()
+
+    local state = controller.state
+    local first = state:mkid("test_two.cpp")
+    local second = state:mkid("test_typed.cpp")
+    local executable = assert(vim.fn.tempname())
+    local counter = executable .. ".count"
+
+    -- Writes an executable that appends one line to `counter` per listing.
+    local function write_counting_executable(listing)
+      local script =
+        string.format("#!/bin/sh\necho run >> '%s'\nprintf '%%s' '%s'\n", counter, listing)
+
+      lib.files.write(executable, script)
+      assert.is_true(vim.uv.fs_chmod(executable, 493))
+    end
+
+    local function listings()
+      local count = 0
+      local file = io.open(counter, "r")
+
+      if file == nil then
+        return 0
+      end
+
+      for _ in file:lines() do
+        count = count + 1
+      end
+
+      file:close()
+      return count
+    end
+
+    write_counting_executable("First/ParamFixture.Positive/0\n")
+    state:configure_executables({ [executable] = { first, second } })
+
+    nio.scheduler()
+    vim.api.nvim_exec_autocmds("BufWritePost", { pattern = first, modeline = false })
+    vim.api.nvim_exec_autocmds("BufWritePost", { pattern = second, modeline = false })
+
+    for _ = 1, 100 do
+      if listings() > 0 then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    -- Let the initial discovery settle before measuring the rebuild.
+    nio.sleep(500)
+    local before_rebuild = listings()
+
+    write_counting_executable("First/ParamFixture.Positive/0\nFirst/ParamFixture.Positive/1\n")
+
+    for _ = 1, 100 do
+      if listings() > before_rebuild then
+        break
+      end
+
+      nio.sleep(20)
+    end
+
+    -- Wait past the refresh debounce so any extra listings have time to start.
+    nio.sleep(800)
+
+    assert.equals(before_rebuild + 1, listings())
   end)
 end)

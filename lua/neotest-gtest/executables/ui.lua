@@ -49,6 +49,9 @@ function M._configure_executable_async()
   local executable = M._select_or_create_executable(executables, common_executable)
 
   if executable ~= nil then
+    -- Relative paths are resolved now, while the working directory is the one the user chose
+    -- from; later lookups may run from another directory.
+    executable = utils.absolute_path(executable, vim.uv.cwd())
     local sources = affected_sources(root2positions)
 
     for root, positions in pairs(root2positions) do
@@ -63,6 +66,9 @@ function M._configure_executable_async()
     for source in pairs(sources) do
       refresh.track(executable, source)
     end
+
+    -- Neotest only rediscovers on save, so do it now for the affected files.
+    refresh.rediscover(sources)
   end
 end
 

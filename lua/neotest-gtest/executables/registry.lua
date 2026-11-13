@@ -43,10 +43,18 @@ local ExecutablesRegistry = {}
 ---@return neotest-gtest.ExecutablesRegistry
 function ExecutablesRegistry:new(normalized_root_dir)
   local storage, _ = Storage:for_directory(normalized_root_dir)
+  local node2executable = storage:node2executable()
+
+  -- Entries saved as relative paths are taken to be relative to the project root.
+  -- Updating in place keeps the storage's table, so the change is saved on flush.
+  for node, executable in pairs(node2executable) do
+    node2executable[node] = utils.absolute_path(executable, normalized_root_dir)
+  end
+
   local registry = {
     _root_dir = normalized_root_dir,
     _storage = storage,
-    _node2executable = storage:node2executable(),
+    _node2executable = node2executable,
     _tree = nil,
   }
 

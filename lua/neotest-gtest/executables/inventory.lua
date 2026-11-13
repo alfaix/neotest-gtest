@@ -8,13 +8,34 @@ end, 3)
 
 local DEFAULT_TIMEOUT_MS = 30000
 
----List the tests registered in a compiled Google Test executable.
----@async
+-- Completed listings, keyed by executable path. An entry is reused only while
+-- the executable's signature is unchanged.
+local cache = {}
+
+-- Listings in flight, keyed by executable path. Concurrent callers for the
+-- same unchanged executable wait for the first one instead of starting another.
+local pending = {}
+
+---Identify the current contents of an executable without reading it.
 ---@param executable string
----@param opts? { timeout_ms?: integer }
----@return string[]
-function M.list(executable, opts)
-  local timeout_ms = (opts and opts.timeout_ms) or DEFAULT_TIMEOUT_MS
+---@return string|nil signature nil when the file cannot be stat'ed
+function M.signature(executable)
+  local err, stat = nio.uv.fs_stat(executable)
+
+  if err or not stat then
+    return nil
+  end
+
+  return string.format("%d:%d:%d", stat.size, stat.mtime.sec, stat.mtime.nsec)
+end
+
+---Forget the cached listing for an executable, for example after a rebuild.
+---@param executable string
+function M.invalidate(executable)
+  cache[executable] = nil
+end
+
+local function run_list(executable, timeout_ms)
   local result = run({ executable, "--gtest_list_tests" }, { text = true, timeout = timeout_ms })
 
   if result.code == 124 then
@@ -26,6 +47,64 @@ function M.list(executable, opts)
   end
 
   return M.parse_list(result.stdout)
+end
+
+---List the tests registered in a compiled Google Test executable.
+---Results are cached per executable until its signature changes. Concurrent
+---calls for the same executable share a single process.
+---@async
+---@param executable string
+---@param opts? { timeout_ms?: integer }
+---@return string[]
+function M.list(executable, opts)
+  local timeout_ms = (opts and opts.timeout_ms) or DEFAULT_TIMEOUT_MS
+  local signature = M.signature(executable)
+
+  -- Without a signature there is nothing to run or cache. Failing here avoids a process
+  -- error whose text is mostly stack trace.
+  if signature == nil then
+    error(string.format("%s does not exist or cannot be read", executable), 0)
+  end
+
+  local cached = cache[executable]
+  if cached and cached.signature == signature then
+    return cached.names
+  end
+
+  local inflight = pending[executable]
+  if inflight and inflight.signature == signature then
+    inflight.done.wait()
+
+    if not inflight.outcome.ok then
+      error(inflight.outcome.error, 0)
+    end
+
+    return inflight.outcome.names
+  end
+
+  local entry = { signature = signature, done = nio.control.event() }
+  pending[executable] = entry
+
+  local ok, names = pcall(run_list, executable, timeout_ms)
+
+  if pending[executable] == entry then
+    pending[executable] = nil
+  end
+
+  if ok then
+    cache[executable] = { signature = signature, names = names }
+    entry.outcome = { ok = true, names = names }
+  else
+    entry.outcome = { ok = false, error = names }
+  end
+
+  entry.done.set()
+
+  if not ok then
+    error(names, 0)
+  end
+
+  return names
 end
 
 ---Parse full test names from Google Test's --gtest_list_tests output.

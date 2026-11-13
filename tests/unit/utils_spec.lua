@@ -131,3 +131,79 @@ describe("helper functions", function()
     assert.are.equal("/usr", utils.normalized_root("anything"))
   end)
 end)
+
+describe("absolute_path", function()
+  it("keeps an absolute path unchanged", function()
+    assert.equals("/opt/build/tests", utils.absolute_path("/opt/build/tests", "/home/project"))
+  end)
+
+  it("resolves a relative path against the base directory", function()
+    assert.equals("/home/project/build/tests", utils.absolute_path("build/tests", "/home/project"))
+  end)
+end)
+
+describe("notify_once", function()
+  local original_notify
+  local sent
+
+  before_each(function()
+    sent = {}
+    original_notify = utils.schedule_notify
+    utils.schedule_notify = function(msg)
+      sent[#sent + 1] = msg
+    end
+  end)
+
+  after_each(function()
+    utils.schedule_notify = original_notify
+  end)
+
+  it("sends a repeated message for the same key only once", function()
+    utils.notify_once("dedupe-repeat", "same", vim.log.levels.WARN)
+    utils.notify_once("dedupe-repeat", "same", vim.log.levels.WARN)
+
+    assert.same({ "same" }, sent)
+  end)
+
+  it("sends again after the key is cleared", function()
+    utils.notify_once("dedupe-clear", "again", vim.log.levels.WARN)
+    utils.notify_clear("dedupe-clear")
+    utils.notify_once("dedupe-clear", "again", vim.log.levels.WARN)
+
+    assert.same({ "again", "again" }, sent)
+  end)
+
+  it("sends a changed message for the same key", function()
+    utils.notify_once("dedupe-change", "first", vim.log.levels.WARN)
+    utils.notify_once("dedupe-change", "second", vim.log.levels.WARN)
+
+    assert.same({ "first", "second" }, sent)
+  end)
+end)
+
+describe("summarize_list", function()
+  it("lists short lists in full", function()
+    assert.equals("a, b", utils.summarize_list({ "a", "b" }))
+  end)
+
+  it("shortens long lists and counts the rest", function()
+    assert.equals("a, b, c and 2 more", utils.summarize_list({ "a", "b", "c", "d", "e" }))
+  end)
+end)
+
+describe("new_results_dir", function()
+  it("removes old results folders that still contain files", function()
+    nio.scheduler()
+
+    local first = utils.new_results_dir({ history_size = 1 })
+    lib.files.write(first .. "/test_result_0.json", "{}")
+
+    local second = utils.new_results_dir({ history_size = 1 })
+
+    assert.is_nil(vim.uv.fs_stat(first))
+    assert.is_not_nil(vim.uv.fs_stat(second))
+
+    nio.scheduler()
+    vim.fn.delete(second, "rf")
+  end)
+end)

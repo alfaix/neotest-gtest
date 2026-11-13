@@ -208,12 +208,28 @@ local function get_file_language(file_path)
   return vim.treesitter.language.get_lang(ft)
 end
 
-local function parse_positions_from_string(file_path, content)
+-- Parsed positions per file, as plain lists, keyed by file path. An entry is
+-- reused only while the file's content digest is unchanged.
+local source_cache = {}
+
+local function parse_source(file_path, content)
   local lang = get_file_language(file_path)
   local lang_tree = vim.treesitter.get_string_parser(content, lang, nil)
   local treesitter_tree = ts_lib.fast_parse(lang_tree):root()
-  local tests_tree = collect_tests(file_path, content, treesitter_tree)
-  local neotest_tree = Tree.from_list(tests_tree, function(pos)
+  return collect_tests(file_path, content, treesitter_tree)
+end
+
+local function parse_positions_from_string(file_path, content)
+  local digest = vim.fn.sha256(content)
+  local cached = source_cache[file_path]
+
+  if cached == nil or cached.digest ~= digest then
+    cached = { digest = digest, positions = parse_source(file_path, content) }
+    source_cache[file_path] = cached
+  end
+
+  -- Hand out a copy so that no caller can change what later calls return.
+  local neotest_tree = Tree.from_list(vim.deepcopy(cached.positions), function(pos)
     return pos.id
   end)
   return neotest_tree

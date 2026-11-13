@@ -204,6 +204,24 @@ function NotificationsMock:assert_no_other_notifications()
   end
 end
 
+---Asserts that every notification contains one of `messages`, however many copies were sent.
+---@param messages string[]
+function NotificationsMock:assert_only_notified(messages)
+  for _, notification in ipairs(self._notifications) do
+    local matched = false
+
+    for _, message in ipairs(messages) do
+      if string.find(notification.message, message, 1, true) then
+        matched = true
+      end
+    end
+
+    if not matched then
+      error(string.format("Unexpected notification: %s", vim.inspect(notification)))
+    end
+  end
+end
+
 function NotificationsMock:assert_notified(message, level)
   for _, notification in ipairs(self._notifications) do
     if string.find(notification.message, message, 1, true) then

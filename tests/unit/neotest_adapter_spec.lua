@@ -267,22 +267,58 @@ describe("adapter spec", function()
     assert.equals(1, vim.tbl_count(report_dirs))
   end)
 
-  it("requires a refreshed runtime inventory for isolated generated cases", function()
+  it("skips isolated generated sources without compiled cases and warns once", function()
     local file = assert(vim.fn.tempname()) .. ".cpp"
     lib.files.write(file, "TEST_P(Fixture, Case) {}")
 
     local tree = parse.parse_positions(file)
+    local utils = require("neotest-gtest.utils")
+    local original_notify = utils.schedule_notify
+    local notified = {}
 
     executables.find_executables = function(node)
       return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
     end
+    utils.schedule_notify = function(msg, level)
+      notified[#notified + 1] = { msg = msg, level = level }
+    end
 
-    local ok, err = pcall(function()
-      NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
+    local ok, specs = pcall(function()
+      return NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
     end)
+    utils.schedule_notify = original_notify
 
-    assert.is_false(ok)
-    assert.matches("Process isolation requires compiled case inventory", err, 1, true)
+    assert.is_true(ok, tostring(specs))
+    assert.same({}, specs)
+    assert.equals(1, #notified)
+    assert.equals(vim.log.levels.WARN, notified[1].level)
+    assert.matches("Process isolation skipped 1 source(s)", notified[1].msg, 1, true)
+    assert.matches(file .. "::Fixture::Case", notified[1].msg, 1, true)
+  end)
+
+  it("isolates the cases it can resolve when another source has no compiled cases", function()
+    local file = assert(vim.fn.tempname()) .. ".cpp"
+    lib.files.write(file, "TEST(Fixture, Plain) {}\nTEST_P(Fixture, Case) {}")
+
+    local tree = parse.parse_positions(file)
+    local utils = require("neotest-gtest.utils")
+    local original_notify = utils.schedule_notify
+
+    executables.find_executables = function(node)
+      return { [MOCK_EXECUTABLE] = { node:data().id } }, {}
+    end
+    utils.schedule_notify = function() end
+
+    local ok, specs = pcall(function()
+      return NeotestAdapter:new({ tree = tree, process_isolation = true }):build_specs()
+    end)
+    utils.schedule_notify = original_notify
+
+    assert.is_true(ok, tostring(specs))
+    assert.equals(1, #specs)
+    local cases = specs[1].context.isolated_cases
+    assert.equals(1, #cases)
+    assert.equals(file .. "::Fixture::Plain", cases[1].context.position_ids[1])
   end)
 
   it("rejects one spec that maps the same runtime name to two source files", function()

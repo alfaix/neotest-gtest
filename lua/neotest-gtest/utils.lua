@@ -175,7 +175,7 @@ function M.new_results_dir(opts)
     local path = existing_paths[i]
     -- making sure we don't remove something important
     assert(path:match("%/googletest%-of.*%/neotest%-gtest%-run%-%d+$"))
-    Path:new(path):rm({ recusrive = true })
+    Path:new(path):rm({ recursive = true })
   end
 
   local new_nr
@@ -233,9 +233,59 @@ function M.normalized_root(path)
   end
 end
 
+---Returns `path` as an absolute path. Relative paths are resolved against `base`.
+---@param path string
+---@param base string Absolute directory to resolve relative paths against
+---@return string
+function M.absolute_path(path, base)
+  if vim.startswith(path, "/") or path:match("^%a:[/\\]") then
+    return vim.fs.normalize(path)
+  end
+
+  return vim.fs.normalize(vim.fs.joinpath(base, path))
+end
+
 function M.schedule_notify(msg, level, opts)
   nio.scheduler()
   vim.notify(msg, level, opts)
+end
+
+-- Last message sent for each key by `notify_once`.
+local last_notified = {}
+
+---Sends `msg` unless it is the same message last sent under `key`. Call `notify_clear` when the
+---condition behind the message goes away, so that it is shown again if the condition returns.
+---@param key string Identifies the condition, for example one executable's inventory
+---@param msg string
+---@param level integer
+function M.notify_once(key, msg, level)
+  if last_notified[key] == msg then
+    return
+  end
+
+  last_notified[key] = msg
+  M.schedule_notify(msg, level)
+end
+
+---Forgets the last message sent under `key`.
+---@param key string
+function M.notify_clear(key)
+  last_notified[key] = nil
+end
+
+---Lists up to `limit` items, followed by how many were left out.
+---@param items string[]
+---@param limit? integer Defaults to 3
+---@return string
+function M.summarize_list(items, limit)
+  limit = limit or 3
+
+  if #items <= limit then
+    return table.concat(items, ", ")
+  end
+
+  local shown = vim.list_slice(items, 1, limit)
+  return string.format("%s and %d more", table.concat(shown, ", "), #items - limit)
 end
 
 function M.schedule_error(message, level)
